@@ -30,6 +30,10 @@ KNOWN_CHARACTERS = {
 # Alembic import scale (1.0 = default; change if assets appear the wrong size)
 ALEMBIC_SCALE = 1.0
 
+# Set to True to preview what the script would do without importing anything.
+# All folder creation and imports are skipped; the log shows the full plan.
+DRY_RUN = False
+
 # ─── END CONFIG ──────────────────────────────────────────────────────────────
 
 import os
@@ -226,6 +230,7 @@ def dispatch_import(disk_path, info, asset_name):
     """
     Route a file to the correct import function based on its detected kind.
     Returns True on success, False on skip/failure.
+    When DRY_RUN is True, logs the plan and returns True without touching UE.
     """
     kind = info["kind"]
     destination = destination_for(kind, info["shot"])
@@ -233,6 +238,14 @@ def dispatch_import(disk_path, info, asset_name):
     if destination is None:
         unreal.log_warning(f"    [WARN] Could not resolve destination for kind='{kind}'. Skipping.")
         return False
+
+    if DRY_RUN:
+        unreal.log(f"    [DRY RUN] Would create dir : {destination}")
+        unreal.log(f"    [DRY RUN] Would import     : {os.path.basename(disk_path)}")
+        unreal.log(f"    [DRY RUN] Destination      : {destination}/{asset_name}")
+        if info["sk_path"]:
+            unreal.log(f"    [DRY RUN] Skeleton         : {info['sk_path']}")
+        return True
 
     ensure_directory(destination)
 
@@ -320,4 +333,7 @@ def run():
     unreal.log(sep + "\n")
 
 
-run()
+# Guard lets this file be imported by test_parse.py without executing run().
+# UE's script runner sets __name__ == '__main__' just like the CLI does.
+if __name__ == '__main__':
+    run()
