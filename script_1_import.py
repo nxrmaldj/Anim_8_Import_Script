@@ -88,6 +88,53 @@ def pick_folder(title="Select Maya Export Folder (FBX / ABC files)"):
     return ""
 
 
+# ─── PROJECT NAME INPUT ──────────────────────────────────────────────────────
+
+def ask_project_name(default=""):
+    """
+    Open a text-input dialog so the user can type (or confirm) the project name.
+    The current PROJECT_NAME value is pre-filled as the default.
+    Returns the entered string, or empty string if the user cancels.
+    Tries tkinter simpledialog first; falls back to PowerShell InputBox.
+    """
+    prompt = "Enter the project name.\nThis becomes the folder under /Game/Production/."
+
+    # ── Option A: tkinter simpledialog ───────────────────────────────────────
+    try:
+        import tkinter as tk
+        from tkinter import simpledialog
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes("-topmost", True)
+        name = simpledialog.askstring(
+            title="Project Name",
+            prompt=prompt,
+            initialvalue=default,
+            parent=root
+        )
+        root.destroy()
+        return name.strip() if name else ""
+    except Exception:
+        pass
+
+    # ── Option B: PowerShell InputBox (Windows fallback) ────────────────────
+    try:
+        import subprocess
+        ps = (
+            "[System.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic') | Out-Null; "
+            f"[Microsoft.VisualBasic.Interaction]::InputBox('{prompt}', 'Project Name', '{default}')"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True, text=True, timeout=60
+        )
+        return result.stdout.strip()
+    except Exception:
+        pass
+
+    return ""
+
+
 # ─── FILENAME PARSING ────────────────────────────────────────────────────────
 
 def parse_filename(filename):
@@ -157,14 +204,14 @@ def ensure_directory(content_path):
         unreal.log(f"    [DIR] Created: {content_path}")
 
 
-def destination_for(kind, shot):
-    """Return the target Content Browser folder path for a given kind/shot."""
+def destination_for(kind, shot, project):
+    """Return the target Content Browser folder path for a given kind/shot/project."""
     if kind in ("anim", "alembic"):
-        return f"{PROJECT_ROOT}/{PROJECT_NAME}/{shot}/Animation"
+        return f"{PROJECT_ROOT}/{project}/{shot}/Animation"
     if kind == "static":
         return f"{ASSETS_ROOT}/Props"
     if kind == "shared":
-        return f"{PROJECT_ROOT}/{PROJECT_NAME}/_Assets"
+        return f"{PROJECT_ROOT}/{project}/_Assets"
     return None
 
 
@@ -270,14 +317,14 @@ def import_static_mesh(disk_path, destination, asset_name):
 
 # ─── DISPATCH ────────────────────────────────────────────────────────────────
 
-def dispatch_import(disk_path, info, asset_name):
+def dispatch_import(disk_path, info, asset_name, project):
     """
     Route a file to the correct import function based on its detected kind.
     Returns True on success, False on skip/failure.
     When DRY_RUN is True, logs the plan and returns True without touching UE.
     """
     kind = info["kind"]
-    destination = destination_for(kind, info["shot"])
+    destination = destination_for(kind, info["shot"], project)
 
     if destination is None:
         unreal.log_warning(f"    [WARN] Could not resolve destination for kind='{kind}'. Skipping.")
@@ -335,6 +382,15 @@ def run():
 
     unreal.log(f"Source folder: {source}")
 
+    # ── Resolve project name ─────────────────────────────────────────────────
+    project = ask_project_name(default=PROJECT_NAME)
+
+    if not project:
+        unreal.log_warning("No project name entered — aborting.")
+        return
+
+    unreal.log(f"Project name : {project}")
+
     all_files = sorted(
         f for f in os.listdir(source)
         if os.path.splitext(f)[1].lower() in ('.fbx', '.abc')
@@ -347,7 +403,7 @@ def run():
     sep = "=" * 60
     unreal.log(f"\n{sep}")
     unreal.log("Script 1 — Import & Folder Setup")
-    unreal.log(f"Project : {PROJECT_NAME}")
+    unreal.log(f"Project : {project}")
     unreal.log(f"Source  : {source}")
     unreal.log(f"Files   : {len(all_files)}")
     unreal.log(sep)
@@ -374,9 +430,9 @@ def run():
         asset_name = re.sub(r'_anim$', '', base, flags=re.IGNORECASE)
 
         try:
-            ok = dispatch_import(disk_path, info, asset_name)
+            ok = dispatch_import(disk_path, info, asset_name, project)
             if ok:
-                dest = destination_for(kind, shot)
+                dest = destination_for(kind, shot, project)
                 unreal.log(f"    ✓ Imported → {dest}/{asset_name}")
                 counts["imported"] += 1
             else:

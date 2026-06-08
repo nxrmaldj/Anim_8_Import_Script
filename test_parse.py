@@ -137,20 +137,24 @@ check("Shot01_Kiiboh_ANIM.fbx → case-insensitive _anim strip",
 print("\n── destination_for ──────────────────────────────────────────────────────")
 
 check("anim → Production/Shot folder",
-      destination("anim", "Shot01"),
+      destination("anim", "Shot01", P),
       f"{PROD}/{P}/Shot01/Animation")
 
 check("alembic → Production/Shot folder",
-      destination("alembic", "Shot03"),
+      destination("alembic", "Shot03", P),
       f"{PROD}/{P}/Shot03/Animation")
 
 check("static → Assets/Props",
-      destination("static", "Shot01"),
+      destination("static", "Shot01", P),
       f"{ASSETS}/Props")
 
 check("shared → Production/_Assets",
-      destination("shared", None),
+      destination("shared", None, P),
       f"{PROD}/{P}/_Assets")
+
+check("destination uses typed project name, not script constant",
+      destination("anim", "Shot01", "NewProject"),
+      f"{PROD}/NewProject/Shot01/Animation")
 
 # ─── SUMMARY ─────────────────────────────────────────────────────────────────
 
