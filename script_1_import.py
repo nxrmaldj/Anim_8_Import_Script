@@ -5,8 +5,9 @@
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
 # Change these values once per project. Everything below reads from this block.
 
-# Path on disk where Maya exported all FBX/ABC files (flat folder)
-SOURCE_FOLDER = "C:/Exports/MyProject"
+# Path on disk where Maya exported all FBX/ABC files (flat folder).
+# Leave blank ("") to get a folder-picker dialog every time the script runs.
+SOURCE_FOLDER = ""
 
 # Root content browser folders — these never change
 PROJECT_ROOT = "/Game/Production"
@@ -42,6 +43,49 @@ import unreal
 
 # Shot number pattern: Shot01, Shot11A, etc.
 _SHOT_RE = re.compile(r'^(Shot\d+[A-Za-z]?)_', re.IGNORECASE)
+
+
+# ─── FOLDER PICKER ───────────────────────────────────────────────────────────
+
+def pick_folder(title="Select Maya Export Folder (FBX / ABC files)"):
+    """
+    Open a native folder-picker dialog and return the chosen path.
+    Tries tkinter first (bundled with most Python builds).
+    Falls back to a PowerShell dialog on Windows if tkinter is unavailable.
+    Returns an empty string if the user cancels.
+    """
+    # ── Option A: tkinter (works in UE's Python on most platforms) ───────────
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes("-topmost", True)
+        folder = filedialog.askdirectory(title=title, parent=root)
+        root.destroy()
+        return folder.replace("\\", "/") if folder else ""
+    except Exception:
+        pass
+
+    # ── Option B: PowerShell WinForms dialog (Windows fallback) ─────────────
+    try:
+        import subprocess
+        ps = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$d = New-Object System.Windows.Forms.FolderBrowserDialog; "
+            f"$d.Description = '{title}'; "
+            "$d.ShowNewFolderButton = $false; "
+            "if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath } else { '' }"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True, text=True, timeout=120
+        )
+        return result.stdout.strip().replace("\\", "/")
+    except Exception:
+        pass
+
+    return ""
 
 
 # ─── FILENAME PARSING ────────────────────────────────────────────────────────
@@ -270,31 +314,48 @@ def dispatch_import(disk_path, info, asset_name):
 # ─── MAIN ────────────────────────────────────────────────────────────────────
 
 def run():
-    if not os.path.isdir(SOURCE_FOLDER):
-        unreal.log_error(f"SOURCE_FOLDER does not exist: {SOURCE_FOLDER}")
-        return
+    # ── Resolve source folder ────────────────────────────────────────────────
+    source = SOURCE_FOLDER.strip()
+
+    if not source or not os.path.isdir(source):
+        if source:
+            unreal.log_warning(f"SOURCE_FOLDER '{source}' not found on disk. Opening folder picker...")
+        else:
+            unreal.log("SOURCE_FOLDER is not set. Opening folder picker...")
+
+        source = pick_folder()
+
+        if not source:
+            unreal.log_warning("No folder selected — aborting.")
+            return
+
+        if not os.path.isdir(source):
+            unreal.log_error(f"Selected path does not exist: {source}")
+            return
+
+    unreal.log(f"Source folder: {source}")
 
     all_files = sorted(
-        f for f in os.listdir(SOURCE_FOLDER)
+        f for f in os.listdir(source)
         if os.path.splitext(f)[1].lower() in ('.fbx', '.abc')
     )
 
     if not all_files:
-        unreal.log_warning("No FBX or ABC files found in SOURCE_FOLDER.")
+        unreal.log_warning(f"No FBX or ABC files found in: {source}")
         return
 
     sep = "=" * 60
     unreal.log(f"\n{sep}")
     unreal.log("Script 1 — Import & Folder Setup")
     unreal.log(f"Project : {PROJECT_NAME}")
-    unreal.log(f"Source  : {SOURCE_FOLDER}")
+    unreal.log(f"Source  : {source}")
     unreal.log(f"Files   : {len(all_files)}")
     unreal.log(sep)
 
     counts = {"imported": 0, "skipped": 0, "errors": 0}
 
     for filename in all_files:
-        disk_path = os.path.join(SOURCE_FOLDER, filename).replace("\\", "/")
+        disk_path = os.path.join(source, filename).replace("\\", "/")
         info      = parse_filename(filename)
         kind      = info["kind"]
         shot      = info["shot"]
