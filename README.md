@@ -1,8 +1,17 @@
 # Anim_8 Import Pipeline
 
-Unreal Engine Python scripts that automate the import of Maya-exported FBX and Alembic files and build Level Sequences per shot.
+Unreal Engine Python tools that organize Maya-exported assets into a clean production folder structure and build Level Sequences per shot.
 
-Works with any Unreal Engine animation project — set `PROJECT_NAME` in the config block and the scripts adapt automatically.
+Works with any Unreal Engine animation project — the project name is typed in at run time, so nothing is hardcoded per production.
+
+---
+
+## Workflow
+
+1. The TA imports all FBX/ABC batches into `/Game/Staging` using Unreal's **native import window** (skeleton linking, LODs, etc. are handled there, the normal way)
+2. Run the organizer script
+3. Every asset is routed by its **real asset type** into the correct production folder
+4. Right-click Staging → **Fix Up Redirectors** to finish cleaning the folder
 
 ---
 
@@ -10,50 +19,77 @@ Works with any Unreal Engine animation project — set `PROJECT_NAME` in the con
 
 | Script | Status | Purpose |
 |---|---|---|
-| `script_1_import.py` | ✅ Ready | Scan export folder → detect file types → create Content Browser folders → import everything to the right place |
+| `script_1_organize.py` | ✅ Ready | Scan `/Game/Staging` → route each asset by type/name → move into production folders |
 | `script_2_sequence.py` | 🔜 Coming soon | Build Level Sequence per shot with camera, skeletal mesh, and geometry cache tracks |
 
 ---
 
 ## How to Run
 
-**Option A — Unreal Python Script Runner**
-
-1. Open Unreal Editor
-2. Go to **Editor → Python Script Runner** (or the Tools menu)
-3. Open the script and click **Run**
-
-**Option B — Command Line**
-
-```
-UnrealEditor.exe MyProject.uproject -ExecutePythonScript="C:/Scripts/script_1_import.py"
-```
-
----
-
-## Config
-
-Both scripts share the same config block at the top of each file. **You only change values in one place per project.**
+**Option A — Unreal Python console**
 
 ```python
-SOURCE_FOLDER   = "C:/Exports/MyProject"   # flat folder of Maya exports on disk
-PROJECT_ROOT    = "/Game/Production"        # never changes
-ASSETS_ROOT     = "/Game/Assets"            # never changes
-PROJECT_NAME    = "FindingKiiboh"           # ← change per project
-
-KNOWN_CHARACTERS = {
-    "Kiiboh": "/Game/Assets/Characters/Kiiboh/SK_Kiiboh",
-    # Add more characters here
-}
-
-ALEMBIC_SCALE = 1.0
+import sys; sys.path.append("A:/Anim_8_Scripts")
+import script_1_organize
+script_1_organize.run(project_name="MyProject", dry_run=True)   # preview first
+script_1_organize.run(project_name="MyProject", dry_run=False)  # then for real
 ```
+
+**Option B — Python Script Runner**
+
+Open `script_1_organize.py` and click Run — a dialog asks for the project name.
+
+**Option C — Editor Utility Widget** *(planned)*
+
+A widget with a project name field, dry-run checkbox, and Run button that calls `script_1_organize.run(...)` directly.
 
 ---
 
-## Filename Convention
+## Routing Rules
 
-All exported files must follow this naming convention:
+Assets are routed by their actual Unreal class — no guessing from filenames:
+
+| Asset in staging | Class | Moves to |
+|---|---|---|
+| `Shot01_Song_anim` | AnimSequence | `/Game/Production/{Project}/Shot01/Animation/` |
+| `Shot02_Debris_anim` | GeometryCache | `/Game/Production/{Project}/Shot02/Animation/` |
+| `SK_Song`, `Song_Skeleton`, physics assets | SkeletalMesh / Skeleton / PhysicsAsset | `/Game/Assets/Characters/Song/` |
+| Any static mesh | StaticMesh | `/Game/Assets/Props/` |
+| Anim with no `Shot##` prefix | AnimSequence | `/Game/Production/{Project}/_Assets/` |
+| Materials, textures, anything else | — | **Left in staging** with a warning |
+
+**Safety:**
+- Never overwrites — existing assets at the destination are skipped and logged
+- Dry run mode prints the full move plan without touching anything
+- Re-running is safe; already-moved assets are simply no longer in staging
+
+---
+
+## Folder Structure Created
+
+```
+/Game/
+├── Staging/                      ← TA imports everything here first
+├── Production/
+│   └── {PROJECT_NAME}/
+│       ├── Shot01/
+│       │   └── Animation/        ← anims + geo caches
+│       ├── Shot02/
+│       │   └── Animation/
+│       └── _Assets/              ← assets with no shot number
+└── Assets/
+    ├── Characters/
+    │   └── {CharacterName}/      ← SK meshes, skeletons, physics assets
+    └── Props/                    ← static meshes
+```
+
+`Shot##` names come directly from the asset name — `Shot11A` is treated as its own shot with no special handling.
+
+---
+
+## Naming Convention
+
+Exports out of Maya should follow this pattern (the asset name in UE mirrors the filename):
 
 | Pattern | Type | Example |
 |---|---|---|
@@ -65,43 +101,12 @@ All exported files must follow this naming convention:
 
 ---
 
-## Folder Structure Created
+## Testing
 
-```
-/Game/
-├── Production/
-│   └── {PROJECT_NAME}/
-│       ├── Shot01/
-│       │   └── Animation/        ← anim FBXs + ABC geo caches
-│       ├── Shot02/
-│       │   └── Animation/
-│       └── _Assets/              ← files with no shot number
-└── Assets/
-    ├── Characters/               ← existing SK assets (not recreated)
-    └── Props/                    ← static meshes from unknown FBXs
+Routing logic can be tested outside Unreal with any Python 3:
+
+```bash
+python test_organize.py
 ```
 
-`Shot##/` folder names come directly from the filename — `Shot11A` is treated as its own shot with no special handling needed.
-
----
-
-## Script 1 — Detection Order
-
-Detection runs top to bottom; first match wins.
-
-1. `_Camera_` token → **SKIP** (handled by Script 2)
-2. Name matches a key in `KNOWN_CHARACTERS` → import as **Animation FBX**
-3. Extension is `.abc` → import as **Alembic / GeometryCache**
-4. Extension is `.fbx` (fallback) → import as **Static Mesh**
-5. No `Shot##` prefix → import to **`_Assets/`** shared folder
-
----
-
-## Checklist — Before Running on a New Project
-
-- [ ] Set `SOURCE_FOLDER` to the Maya export folder on disk
-- [ ] Set `PROJECT_NAME`
-- [ ] Update `KNOWN_CHARACTERS` with this project's characters
-- [ ] Verify `ALEMBIC_SCALE` looks correct after first import (usually `1.0`)
-- [ ] Run **Script 1** first
-- [ ] Then run **Script 2** per shot *(coming soon)*
+This mocks the `unreal` module and verifies shot parsing, character name cleanup, and every routing rule.
