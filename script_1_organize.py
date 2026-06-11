@@ -133,7 +133,14 @@ def ensure_directory(content_path):
 
 
 def ask_project_name(default=""):
-    """Fallback text-input dialog for when run() is called without a project name."""
+    """
+    Text-input dialog for when run() is called without a project name.
+    Tries tkinter first; falls back to a PowerShell InputBox on Windows.
+    Returns empty string if the user cancels.
+    """
+    prompt = "Enter the project name.\nThis becomes the folder under /Game/Production/."
+
+    # ── Option A: tkinter simpledialog ───────────────────────────────────────
     try:
         import tkinter as tk
         from tkinter import simpledialog
@@ -142,14 +149,31 @@ def ask_project_name(default=""):
         root.wm_attributes("-topmost", True)
         name = simpledialog.askstring(
             title="Project Name",
-            prompt="Enter the project name.\nThis becomes the folder under /Game/Production/.",
+            prompt=prompt,
             initialvalue=default,
             parent=root
         )
         root.destroy()
         return name.strip() if name else ""
     except Exception:
-        return ""
+        pass
+
+    # ── Option B: PowerShell InputBox (Windows fallback) ─────────────────────
+    try:
+        import subprocess
+        ps = (
+            "[System.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic') | Out-Null; "
+            f"[Microsoft.VisualBasic.Interaction]::InputBox('{prompt}', 'Project Name', '{default}')"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True, text=True, timeout=60
+        )
+        return result.stdout.strip()
+    except Exception:
+        pass
+
+    return ""
 
 
 # ─── MAIN ────────────────────────────────────────────────────────────────────
