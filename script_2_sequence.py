@@ -155,6 +155,41 @@ def ask_choice(options, title="Select Project"):
     return ""
 
 
+def confirm_dialog(message, title="Confirm"):
+    """
+    Yes/No confirmation dialog. Returns True only when the user clicks Yes.
+    tkinter first, PowerShell MessageBox fallback.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes("-topmost", True)
+        answer = messagebox.askyesno(title=title, message=message, parent=root)
+        root.destroy()
+        return bool(answer)
+    except Exception:
+        pass
+
+    try:
+        import subprocess
+        ps = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            f"$r = [System.Windows.Forms.MessageBox]::Show('{message}', '{title}', 'YesNo', 'Warning'); "
+            "if ($r -eq 'Yes') { 'YES' } else { 'NO' }"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True, text=True, timeout=120
+        )
+        return result.stdout.strip() == "YES"
+    except Exception:
+        pass
+
+    return False
+
+
 # ─── UNREAL HELPERS ──────────────────────────────────────────────────────────
 
 def get_asset_class_name(asset_data):
@@ -381,7 +416,8 @@ def add_camera(sequence, camera_fbx_path, camera_name, duration_frames=0):
 
 # ─── MAIN ────────────────────────────────────────────────────────────────────
 
-def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SEQUENCE_FPS):
+def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SEQUENCE_FPS,
+        overwrite=False):
     """
     Build Level Sequences for shots in the chosen project.
 
@@ -390,6 +426,8 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
       shot_filter    e.g. "Shot01" → build only that shot ("" = all shots)
       dry_run        True → log the full build plan without creating anything
       fps            sequence frame rate: 24, 30, or 60 (default 24)
+      overwrite      True → delete and rebuild existing sequences. Always asks
+                     for confirmation first. Default False (skip existing).
     """
     sep = "=" * 60
 
@@ -431,12 +469,35 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
         )
         return
 
+    # ── Overwrite confirmation ───────────────────────────────────────────────
+    existing = [
+        s for s in shots
+        if unreal.EditorAssetLibrary.does_asset_exist(
+            f"{PROJECT_ROOT}/{project}/{s}/{sequence_name_for(s, project)}"
+        )
+    ]
+
+    if overwrite and existing and not dry_run:
+        confirmed = confirm_dialog(
+            f"Are you sure you want to OVERWRITE {len(existing)} existing "
+            f"level sequence(s) in '{project}'?\n\n"
+            "This deletes them and rebuilds from current shot assets. "
+            "This cannot be undone.",
+            title="Overwrite Level Sequences?"
+        )
+        if not confirmed:
+            unreal.log_warning("Overwrite not confirmed — aborting. "
+                               "Run without overwrite to build only missing sequences.")
+            return
+
     unreal.log(f"\n{sep}")
     unreal.log("Script 2 — Level Sequence Builder")
     unreal.log(f"Project : {project}")
     unreal.log(f"FPS     : {fps}")
     unreal.log(f"Cameras : {cam_folder or '(none)'}  ({len(camera_files)} camera FBX found)")
     unreal.log(f"Shots   : {len(shots)}" + (f"  (filtered to {shot_filter})" if shot_filter else ""))
+    if overwrite:
+        unreal.log(f"Overwrite : ON — {len(existing)} existing sequence(s) will be rebuilt")
     if dry_run:
         unreal.log("Mode    : DRY RUN — nothing will be created")
     unreal.log(sep)
@@ -452,11 +513,17 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
 
         unreal.log(f"\n  {shot}")
 
-        # Skip rule: sequence with the same name already exists
+        # Existing sequence: skip by default, delete first when overwriting
         if unreal.EditorAssetLibrary.does_asset_exist(seq_path):
-            unreal.log(f"    → SKIPPED — {seq_name} already exists")
-            counts["skipped"] += 1
-            continue
+            if not overwrite:
+                unreal.log(f"    → SKIPPED — {seq_name} already exists")
+                counts["skipped"] += 1
+                continue
+            if dry_run:
+                unreal.log(f"    [DRY RUN] Would overwrite existing {seq_name}")
+            else:
+                unreal.EditorAssetLibrary.delete_asset(seq_path)
+                unreal.log(f"    ⟳ Deleted existing {seq_name} (overwrite)")
 
         anims, caches = collect_shot_assets(project, shot)
         camera_fbx    = find_camera_fbx(shot, camera_files)
