@@ -258,8 +258,20 @@ def add_anim_track(sequence, anim_package):
     if skeletal_mesh is None:
         return False, f"no SkeletalMesh found for skeleton {skeleton.get_name()}", 0
 
-    # Spawnable binding from the skeletal mesh, with an animation track
-    binding = sequence.add_spawnable_from_instance(skeletal_mesh)
+    # Spawn a temporary SkeletalMeshActor, build the spawnable from it, then
+    # remove the temp actor. Passing the raw mesh asset to
+    # add_spawnable_from_instance creates an object binding Sequencer cannot
+    # spawn (greyed-out tracks).
+    actor_subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    temp_actor = actor_subsystem.spawn_actor_from_object(
+        skeletal_mesh, unreal.Vector(0, 0, 0), unreal.Rotator(0, 0, 0)
+    )
+    if temp_actor is None:
+        return False, f"could not spawn actor for {skeletal_mesh.get_name()}", 0
+
+    binding = sequence.add_spawnable_from_instance(temp_actor)
+    actor_subsystem.destroy_actor(temp_actor)
+
     anim_track = binding.add_track(unreal.MovieSceneSkeletalAnimationTrack)
     section = anim_track.add_section()
     section.params.animation = anim
@@ -282,7 +294,18 @@ def add_geocache_track(sequence, cache_package):
     if cache is None:
         return False, f"could not load {cache_package}", 0
 
-    binding = sequence.add_spawnable_from_instance(cache)
+    # Same temp-actor pattern as add_anim_track — the binding must come from
+    # a spawned GeometryCacheActor, not the raw asset.
+    actor_subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    temp_actor = actor_subsystem.spawn_actor_from_object(
+        cache, unreal.Vector(0, 0, 0), unreal.Rotator(0, 0, 0)
+    )
+    if temp_actor is None:
+        return False, f"could not spawn actor for {cache.get_name()}", 0
+
+    binding = sequence.add_spawnable_from_instance(temp_actor)
+    actor_subsystem.destroy_actor(temp_actor)
+
     track = binding.add_track(unreal.MovieSceneGeometryCacheTrack)
     section = track.add_section()
 
