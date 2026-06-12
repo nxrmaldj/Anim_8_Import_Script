@@ -39,6 +39,8 @@ DRY_RUN = False
 import re
 import unreal
 
+from pipeline_common import get_open_project_name, resolve_production_project
+
 # Shot number pattern: Shot01, Shot11A, etc.
 _SHOT_RE = re.compile(r'^(Shot\d+[A-Za-z]?)_', re.IGNORECASE)
 
@@ -185,7 +187,7 @@ def run(staging_path=None, project_name="", dry_run=None):
     Widget, the Python console, or executed directly.
 
       staging_path  Content Browser path to scan   (default: STAGING_FOLDER)
-      project_name  Production folder name          (default: dialog prompt)
+      project_name  Production folder name (blank → open Unreal project name)
       dry_run       Log the plan without moving     (default: DRY_RUN)
     """
     staging = (staging_path or STAGING_FOLDER).rstrip("/")
@@ -197,7 +199,10 @@ def run(staging_path=None, project_name="", dry_run=None):
         return
 
     # ── Resolve project name ─────────────────────────────────────────────────
-    project = project_name.strip() if project_name else ask_project_name(default=PROJECT_NAME)
+    project = resolve_production_project(project_name)
+    if not project:
+        default = get_open_project_name() or PROJECT_NAME
+        project = ask_project_name(default=default)
     if not project:
         unreal.log_warning("No project name provided — aborting.")
         return

@@ -23,6 +23,8 @@ import os
 import re
 import unreal
 
+from pipeline_common import get_open_project_name, resolve_production_project
+
 _SHOT_RE = re.compile(r'^Shot\d+[A-Za-z]?$', re.IGNORECASE)
 
 # Camera FBX filename patterns, e.g. Shot01_cam.fbx or Shot01_Camera_anim.fbx
@@ -97,10 +99,11 @@ def pick_folder(title="Select Maya Export Folder (camera FBX files)"):
     return ""
 
 
-def ask_choice(options, title="Select Project"):
+def ask_choice(options, title="Select Project", default=""):
     """
     Show a list of options and let the user pick one.
     Returns the chosen string, or '' on cancel.
+    Pre-selects `default` when it appears in the list.
     """
     if len(options) == 1:
         return options[0]
@@ -114,12 +117,15 @@ def ask_choice(options, title="Select Project"):
         root.wm_attributes("-topmost", True)
         root.geometry("360x320")
 
-        tk.Label(root, text="Select the project to build sequences for:").pack(pady=8)
+        tk.Label(root, text="Select the production folder to build sequences for:").pack(pady=8)
 
         listbox = tk.Listbox(root)
-        for option in options:
+        select_index = 0
+        for i, option in enumerate(options):
             listbox.insert(tk.END, option)
-        listbox.selection_set(0)
+            if default and option.lower() == default.lower():
+                select_index = i
+        listbox.selection_set(select_index)
         listbox.pack(fill=tk.BOTH, expand=True, padx=12)
 
         def confirm():
@@ -421,7 +427,7 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
     """
     Build Level Sequences for shots in the chosen project.
 
-      project_name   blank → selection dialog of /Game/Production/ folders
+      project_name   blank → open Unreal project if folder exists under Production
       camera_folder  blank → folder picker for the Maya camera FBX exports
       shot_filter    e.g. "Shot01" → build only that shot ("" = all shots)
       dry_run        True → log the full build plan without creating anything
@@ -440,7 +446,10 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
         unreal.log_error(f"No project folders found under {PROJECT_ROOT}")
         return
 
-    project = project_name.strip() or ask_choice(projects)
+    project = resolve_production_project(project_name, projects)
+    if not project:
+        ue_default = get_open_project_name()
+        project = ask_choice(projects, default=ue_default)
     if not project:
         unreal.log_warning("No project selected — aborting.")
         return

@@ -11,12 +11,12 @@ sections: **Organize Staging** (Script 1) and **Build Sequences** (Script 2).
 ┌─ Anim8 Pipeline ──────────────────────────────┐
 │                                               │
 │  ── 1 · Organize Staging ──────────────────   │
-│  Project Name   [____________________]        │
+│  Project Name   [____________________]        │  ← optional: blank = open UE project
 │  [ ] Dry Run                                  │
 │  [        Organize Staging        ]           │
 │                                               │
 │  ── 2 · Build Level Sequences ─────────────   │
-│  Project Name   [____________________]        │
+│  Project Name   [____________________]        │  ← optional: blank = open UE project
 │  Camera Folder  [____________________]        │
 │  Shot Filter    [____________________]        │
 │  FPS            [ 24 ▼ ]                      │
@@ -33,7 +33,7 @@ sections: **Organize Staging** (Script 1) and **Build Sequences** (Script 2).
 
 | Widget type | Variable name | Notes |
 |---|---|---|
-| Editable Text Box | `OrganizeProjectInput` | The /Game/Production/ folder name |
+| Editable Text Box | `OrganizeProjectInput` | Optional — blank uses the open `.uproject` name |
 | Check Box | `OrganizeDryRunCheckbox` | Unchecked by default |
 | Button | `OrganizeRunButton` | Fires Script 1 |
 
@@ -41,7 +41,7 @@ sections: **Organize Staging** (Script 1) and **Build Sequences** (Script 2).
 
 | Widget type | Variable name | Notes |
 |---|---|---|
-| Editable Text Box | `SequenceProjectInput` | Leave blank → selection dialog pops |
+| Editable Text Box | `SequenceProjectInput` | Optional — blank uses open UE project if folder exists; else picker |
 | Editable Text Box | `CameraFolderInput` | Disk path. Leave blank → folder picker pops |
 | Editable Text Box | `ShotFilterInput` | e.g. `Shot01`. Blank = build ALL shots |
 | Combo Box (String) | `FpsCombo` | Options: `24`, `30`, `60`. Default `24` |
@@ -89,9 +89,10 @@ Pin wiring:
 
 ## Behavior Notes
 
-- **Blank fields fall back to dialogs** — empty project name opens the
-  selection dialog, empty camera folder opens the folder picker. The widget
-  never blocks you.
+- **Blank project name** uses the **open Unreal project name** (your `.uproject`
+  file). Script 1 always uses it for `/Game/Production/{name}/`. Script 2 uses
+  it only if that folder already exists under Production; otherwise the
+  production-folder picker opens (with the UE project pre-selected if listed).
 - **Overwrite checkbox** only arms the option — the Python script still shows
   the "Are you sure you want to OVERWRITE N sequences?" Yes/No prompt before
   deleting anything.
