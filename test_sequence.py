@@ -113,6 +113,29 @@ print("\n── sequence_name_for ───────────────�
 check("Shot01 + MyProject → Shot01_MyProject",
       s2.sequence_name_for("Shot01", "MyProject"), "Shot01_MyProject")
 
+resolve = s2.resolve_shots
+
+# ─── resolve_shots ───────────────────────────────────────────────────────────
+
+print("\n── resolve_shots ────────────────────────────────────────────────────────")
+
+all_shots = ["Shot01", "Shot02", "Shot03", "Shot11A"]
+
+check("blank filter → all shots",
+      resolve(all_shots), all_shots)
+
+check("single shot filter",
+      resolve(all_shots, shot_filter="Shot02"), ["Shot02"])
+
+check("comma-separated filter",
+      resolve(all_shots, shot_filter="Shot01,Shot11A"), ["Shot01", "Shot11A"])
+
+check("case-insensitive filter",
+      resolve(all_shots, shot_filter="shot03"), ["Shot03"])
+
+check("no match → empty",
+      resolve(all_shots, shot_filter="Shot99"), [])
+
 # ─── SUMMARY ─────────────────────────────────────────────────────────────────
 
 sep = "─" * 60

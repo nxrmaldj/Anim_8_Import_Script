@@ -18,7 +18,7 @@ sections: **Organize Staging** (Script 1) and **Build Sequences** (Script 2).
 │  ── 2 · Build Level Sequences ─────────────   │
 │  Project Name   [____________________]        │  ← optional: blank = open UE project
 │  Camera Folder  [____________________]        │
-│  Shot Filter    [____________________]        │
+│  [x] All Shots                                │  ← unchecked → checkbox picker on Run
 │  FPS            [ 24 ▼ ]                      │
 │  [ ] Dry Run                                  │
 │  [ ] Overwrite Existing                       │
@@ -42,8 +42,8 @@ sections: **Organize Staging** (Script 1) and **Build Sequences** (Script 2).
 | Widget type | Variable name | Notes |
 |---|---|---|
 | Editable Text Box | `SequenceProjectInput` | Optional — blank uses open UE project if folder exists; else picker |
-| Editable Text Box | `CameraFolderInput` | Disk path. Leave blank → folder picker pops |
-| Editable Text Box | `ShotFilterInput` | e.g. `Shot01`. Blank = build ALL shots |
+| Editable Text Box | `CameraFolderInput` | Optional — blank opens folder picker |
+| Check Box | `AllShotsCheckbox` | **Checked by default** — unchecked opens shot checkbox dialog on Run |
 | Combo Box (String) | `FpsCombo` | Options: `24`, `30`, `60`. Default `24` |
 | Check Box | `SequenceDryRunCheckbox` | Unchecked by default |
 | Check Box | `OverwriteCheckbox` | **Unchecked by default** — Python still asks "Are you sure?" |
@@ -71,7 +71,7 @@ Pin wiring:
 ### Button 2 — SequenceRunButton → OnClicked
 
 ```
-import sys; sys.path.append("A:/Anim_8_Scripts"); import script_2_sequence, importlib; importlib.reload(script_2_sequence); script_2_sequence.run(project_name="{project}", camera_folder="{camfolder}", shot_filter="{shot}", dry_run={dry}, fps={fps}, overwrite={ow})
+import sys; sys.path.append("A:/Anim_8_Scripts"); import script_2_sequence, importlib; importlib.reload(script_2_sequence); script_2_sequence.run(project_name="{project}", camera_folder="{camfolder}", dry_run={dry}, fps={fps}, overwrite={ow}, interactive_shots={pick})
 ```
 
 Pin wiring:
@@ -80,15 +80,18 @@ Pin wiring:
 |---|---|
 | `project` | `SequenceProjectInput` → Get Text → To String |
 | `camfolder` | `CameraFolderInput` → Get Text → To String |
-| `shot` | `ShotFilterInput` → Get Text → To String |
 | `fps` | `FpsCombo` → Get Selected Option |
 | `dry` | `SequenceDryRunCheckbox` → Is Checked → Select String (A=`True`, B=`False`) |
 | `ow` | `OverwriteCheckbox` → Is Checked → Select String (A=`True`, B=`False`) |
+| `pick` | `AllShotsCheckbox` → Is Checked → **invert** → Select String (unchecked=`True`, checked=`False`) |
 
 ---
 
 ## Behavior Notes
 
+- **All Shots checkbox** — checked (default) builds every shot. Unchecked opens a
+  scrollable checkbox list of all shots (all pre-checked; uncheck what you skip).
+  Much easier than typing 42 shot names.
 - **Blank project name** uses the **open Unreal project name** (your `.uproject`
   file). Script 1 always uses it for `/Game/Production/{name}/`. Script 2 uses
   it only if that folder already exists under Production; otherwise the
@@ -110,5 +113,5 @@ Pin wiring:
 script_1_organize.run(staging_path=None, project_name="", dry_run=None)
 
 script_2_sequence.run(project_name="", camera_folder="", shot_filter="",
-                      dry_run=False, fps=24, overwrite=False)
+                      dry_run=False, fps=24, overwrite=False, interactive_shots=False)
 ```

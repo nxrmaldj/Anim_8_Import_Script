@@ -161,6 +161,110 @@ def ask_choice(options, title="Select Project", default=""):
     return ""
 
 
+def pick_shots_dialog(available_shots, title="Select Shots to Build"):
+    """
+    Checkbox dialog — all shots checked by default. Uncheck any you skip.
+    Returns the list of selected shot names, or [] on cancel / nothing selected.
+    """
+    if not available_shots:
+        return []
+
+    try:
+        import tkinter as tk
+        result = {"shots": None}
+
+        root = tk.Tk()
+        root.title(title)
+        root.wm_attributes("-topmost", True)
+        root.geometry("340x520")
+
+        tk.Label(
+            root,
+            text="Uncheck shots you do NOT want to build.\n(Ctrl+scroll to scroll the list.)"
+        ).pack(pady=8)
+
+        outer = tk.Frame(root)
+        outer.pack(fill=tk.BOTH, expand=True, padx=12)
+
+        canvas = tk.Canvas(outer, highlightthickness=0)
+        scrollbar = tk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        inner = tk.Frame(canvas)
+
+        inner.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        check_vars = {}
+        for shot in available_shots:
+            var = tk.BooleanVar(value=True)
+            check_vars[shot] = var
+            tk.Checkbutton(inner, text=shot, variable=var, anchor="w").pack(fill=tk.X)
+
+        btn_row = tk.Frame(root)
+        btn_row.pack(pady=6)
+
+        def select_all():
+            for var in check_vars.values():
+                var.set(True)
+
+        def select_none():
+            for var in check_vars.values():
+                var.set(False)
+
+        tk.Button(btn_row, text="Select All", command=select_all, width=12).pack(side=tk.LEFT, padx=4)
+        tk.Button(btn_row, text="Select None", command=select_none, width=12).pack(side=tk.LEFT, padx=4)
+
+        def confirm():
+            result["shots"] = [s for s, var in check_vars.items() if var.get()]
+            root.destroy()
+
+        def cancel():
+            result["shots"] = []
+            root.destroy()
+
+        tk.Button(root, text="Build Selected", command=confirm, width=20).pack(pady=4)
+        tk.Button(root, text="Cancel", command=cancel, width=20).pack(pady=2)
+
+        root.mainloop()
+        return result["shots"] if result["shots"] is not None else []
+    except Exception:
+        pass
+
+    return []
+
+
+def resolve_shots(all_shots, shot_filter="", interactive=False):
+    """
+    Decide which shots to build.
+
+      interactive=False, shot_filter=""  → all shots
+      interactive=True                  → checkbox dialog
+      shot_filter="Shot01"              → single shot
+      shot_filter="Shot01,Shot05"       → comma-separated list
+    """
+    if not all_shots:
+        return []
+
+    if interactive:
+        return pick_shots_dialog(all_shots)
+
+    filt = (shot_filter or "").strip()
+    if not filt:
+        return list(all_shots)
+
+    if "," in filt:
+        requested = {s.strip().lower() for s in filt.split(",") if s.strip()}
+        return [s for s in all_shots if s.lower() in requested]
+
+    target = filt.lower()
+    return [s for s in all_shots if s.lower() == target]
+
+
 def confirm_dialog(message, title="Confirm"):
     """
     Yes/No confirmation dialog. Returns True only when the user clicks Yes.
@@ -423,17 +527,17 @@ def add_camera(sequence, camera_fbx_path, camera_name, duration_frames=0):
 # ─── MAIN ────────────────────────────────────────────────────────────────────
 
 def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SEQUENCE_FPS,
-        overwrite=False):
+        overwrite=False, interactive_shots=False):
     """
     Build Level Sequences for shots in the chosen project.
 
-      project_name   blank → open Unreal project if folder exists under Production
-      camera_folder  blank → folder picker for the Maya camera FBX exports
-      shot_filter    e.g. "Shot01" → build only that shot ("" = all shots)
-      dry_run        True → log the full build plan without creating anything
-      fps            sequence frame rate: 24, 30, or 60 (default 24)
-      overwrite      True → delete and rebuild existing sequences. Always asks
-                     for confirmation first. Default False (skip existing).
+      project_name      blank → open Unreal project if folder exists under Production
+      camera_folder     blank → folder picker for the Maya camera FBX exports
+      shot_filter       optional: "Shot01" or "Shot01,Shot05" (ignored when interactive_shots=True)
+      interactive_shots True  → checkbox dialog to pick shots (all checked by default)
+      dry_run           True  → log the full build plan without creating anything
+      fps               24, 30, or 60 (default 24)
+      overwrite         True  → delete and rebuild existing sequences (asks to confirm first)
     """
     sep = "=" * 60
 
@@ -467,14 +571,13 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
         cam_folder = ""
 
     # ── Discover shots ───────────────────────────────────────────────────────
-    shots = list_shot_folders(project)
-    if shot_filter:
-        shots = [s for s in shots if s.lower() == shot_filter.strip().lower()]
+    all_shots = list_shot_folders(project)
+    shots = resolve_shots(all_shots, shot_filter=shot_filter, interactive=interactive_shots)
 
     if not shots:
         unreal.log_warning(
-            f"No shot folders found for project '{project}'"
-            + (f" matching filter '{shot_filter}'" if shot_filter else "")
+            f"No shots selected for project '{project}'"
+            + (f" (filter: '{shot_filter}')" if shot_filter and not interactive_shots else "")
         )
         return
 
@@ -504,7 +607,10 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
     unreal.log(f"Project : {project}")
     unreal.log(f"FPS     : {fps}")
     unreal.log(f"Cameras : {cam_folder or '(none)'}  ({len(camera_files)} camera FBX found)")
-    unreal.log(f"Shots   : {len(shots)}" + (f"  (filtered to {shot_filter})" if shot_filter else ""))
+    unreal.log(f"Shots   : {len(shots)}" + (
+        "  (picker selection)" if interactive_shots else
+        f"  (filter: {shot_filter})" if shot_filter else "  (all)"
+    ))
     if overwrite:
         unreal.log(f"Overwrite : ON — {len(existing)} existing sequence(s) will be rebuilt")
     if dry_run:
