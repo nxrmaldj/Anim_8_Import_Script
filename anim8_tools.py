@@ -1,18 +1,19 @@
 # anim8_tools.py
 # Blueprint-callable helpers for the Editor Utility Widget.
 #
-# If "Browse Camera Export Folder" does not appear in the Graph search:
-#   Use the Execute Python Command on Find Camera Folder (see WIDGET_GUIDE.md Plan B)
+# If nodes do not appear in the Graph search, copy this file + pipeline_common.py
+# into your project's Content/Python/ folder and restart the editor.
 #
-# To try loading the Blueprint node (once per session):
+# Or run once per session in the Python console:
 #   import sys; sys.path.append("A:/Anim_8_Scripts"); import anim8_tools
-#
-# For the node to appear every editor launch, copy this file + pipeline_common.py
-# into your project's Content/Python/ folder.
 
 import unreal
 
-from pipeline_common import browse_camera_folder
+from pipeline_common import (
+    browse_camera_folder,
+    get_suggested_production_project,
+    list_production_projects,
+)
 
 
 @unreal.uclass()
@@ -21,9 +22,19 @@ class Anim8PipelineTools(unreal.BlueprintFunctionLibrary):
 
     @unreal.ufunction(static=True, ret=str, category="Anim8 Pipeline", call_in_editor=True)
     def browse_camera_export_folder():
-        """
-        Open a folder picker for Maya camera FBX exports.
-        Returns the selected path as a string (empty if cancelled).
-        Wire Return Value → Conv String to Text → Set Text (CameraFolderInput).
-        """
+        """Open folder picker for camera FBX exports. Returns path or empty string."""
         return browse_camera_folder()
+
+    @unreal.ufunction(static=True, ret=unreal.Array(str), category="Anim8 Pipeline", call_in_editor=True)
+    def get_production_project_names():
+        """All production folder names — use on Event Construct to fill the Project combo."""
+        names = list_production_projects()
+        result = unreal.Array(str)
+        for name in names:
+            result.append(name)
+        return result
+
+    @unreal.ufunction(static=True, ret=str, category="Anim8 Pipeline", call_in_editor=True)
+    def get_suggested_production_project():
+        """Default project for the combo (matches open .uproject when possible)."""
+        return get_suggested_production_project()

@@ -21,9 +21,17 @@ SEQUENCE_FPS = 24
 
 import os
 import re
+import importlib
 import unreal
 
-from pipeline_common import get_open_project_name, resolve_production_project, get_last_camera_folder
+import pipeline_common
+importlib.reload(pipeline_common)
+from pipeline_common import (
+    get_open_project_name,
+    resolve_production_project,
+    get_last_camera_folder,
+    list_production_projects,
+)
 
 _SHOT_RE = re.compile(r'^Shot\d+[A-Za-z]?$', re.IGNORECASE)
 
@@ -65,68 +73,6 @@ def sequence_name_for(shot, project):
 
 
 # ─── DIALOGS ─────────────────────────────────────────────────────────────────
-
-def ask_choice(options, title="Select Project", default=""):
-    """
-    Show a list of options and let the user pick one.
-    Returns the chosen string, or '' on cancel.
-    Pre-selects `default` when it appears in the list.
-    """
-    if len(options) == 1:
-        return options[0]
-
-    try:
-        import tkinter as tk
-        chosen = {"value": ""}
-
-        root = tk.Tk()
-        root.title(title)
-        root.wm_attributes("-topmost", True)
-        root.geometry("360x320")
-
-        tk.Label(root, text="Select the production folder to build sequences for:").pack(pady=8)
-
-        listbox = tk.Listbox(root)
-        select_index = 0
-        for i, option in enumerate(options):
-            listbox.insert(tk.END, option)
-            if default and option.lower() == default.lower():
-                select_index = i
-        listbox.selection_set(select_index)
-        listbox.pack(fill=tk.BOTH, expand=True, padx=12)
-
-        def confirm():
-            selection = listbox.curselection()
-            if selection:
-                chosen["value"] = listbox.get(selection[0])
-            root.destroy()
-
-        tk.Button(root, text="OK", command=confirm).pack(pady=8)
-        root.mainloop()
-        return chosen["value"]
-    except Exception:
-        pass
-
-    # PowerShell fallback: numbered choice via InputBox
-    try:
-        import subprocess
-        menu = "; ".join(f"{i + 1} = {name}" for i, name in enumerate(options))
-        ps = (
-            "[System.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic') | Out-Null; "
-            f"[Microsoft.VisualBasic.Interaction]::InputBox('Type the number of the project: {menu}', '{title}', '1')"
-        )
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", ps],
-            capture_output=True, text=True, timeout=120
-        )
-        index = int(result.stdout.strip()) - 1
-        if 0 <= index < len(options):
-            return options[index]
-    except Exception:
-        pass
-
-    return ""
-
 
 def pick_shots_dialog(available_shots, title="Select Shots to Build"):
     """
@@ -278,15 +224,7 @@ def get_asset_class_name(asset_data):
 
 def list_project_folders():
     """Return the names of all folders directly under /Game/Production/."""
-    subpaths = unreal.EditorAssetLibrary.list_assets(
-        PROJECT_ROOT, recursive=False, include_folder=True
-    )
-    folders = []
-    for path in subpaths:
-        path = str(path).rstrip("/")
-        if "." not in path.rsplit("/", 1)[-1]:
-            folders.append(path.rsplit("/", 1)[-1])
-    return sorted(folders)
+    return list_production_projects()
 
 
 def list_shot_folders(project):
@@ -498,8 +436,8 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
     """
     Build Level Sequences for shots in the chosen project.
 
-      project_name      blank → open Unreal project if folder exists under Production
-      camera_folder     disk path from the widget (use Find Camera Folder button)
+      project_name      from widget Project combo (auto-detect if blank and unambiguous)
+      camera_folder     blank → uses last Find Camera Folder pick
       shot_filter       optional: "Shot01" or "Shot01,Shot05" (ignored when interactive_shots=True)
       interactive_shots True  → checkbox dialog to pick shots (all checked by default)
       dry_run           True  → log the full build plan without creating anything
@@ -517,10 +455,21 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
         unreal.log_error(f"No project folders found under {PROJECT_ROOT}")
         return
 
+    raw_project = project_name
     project = resolve_production_project(project_name, projects)
     if not project:
-        ue_default = get_open_project_name()
-        project = ask_choice(projects, default=ue_default)
+        if len(projects) == 1:
+            project = projects[0]
+        else:
+            unreal.log_error(
+                "Select a production project in the widget dropdown. "
+                f"Received project_name={raw_project!r}. "
+                f"Available: {', '.join(projects)}. "
+                "Check Format Text pin {project} is wired to SequenceProjectCombo "
+                "(Get Selected Option or Get Option String At Index), "
+                "not the Organize Project Name text box."
+            )
+            return
     if not project:
         unreal.log_warning("No project selected — aborting.")
         return
@@ -533,8 +482,8 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
     camera_files = []
     if not cam_folder:
         unreal.log_warning(
-            "No camera folder set — click Find Camera Folder first, or paste a path "
-            "into the Camera Folder field. Sequences will be built without cameras."
+            "No camera folder set — click Find Camera Folder before Build Sequences. "
+            "Sequences will be built without cameras."
         )
     elif os.path.isdir(cam_folder):
         camera_files = [f for f in os.listdir(cam_folder) if _CAMERA_FBX_RE.match(f)]

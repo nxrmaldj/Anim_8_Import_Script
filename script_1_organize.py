@@ -37,8 +37,11 @@ DRY_RUN = False
 # ─── END CONFIG ──────────────────────────────────────────────────────────────
 
 import re
+import importlib
 import unreal
 
+import pipeline_common
+importlib.reload(pipeline_common)
 from pipeline_common import get_open_project_name, resolve_production_project
 
 # Shot number pattern: Shot01, Shot11A, etc.

@@ -136,6 +136,18 @@ check("case-insensitive filter",
 check("no match → empty",
       resolve(all_shots, shot_filter="Shot99"), [])
 
+# ─── camera folder memory (survives pipeline_common reload) ───────────────────
+
+print("\n── camera folder session memory ─────────────────────────────────────────")
+
+import importlib
+import pipeline_common as pc
+
+pc.set_last_camera_folder("G:/Export")
+importlib.reload(pc)
+check("camera folder survives importlib.reload",
+      pc.get_last_camera_folder(), "G:/Export")
+
 # ─── SUMMARY ─────────────────────────────────────────────────────────────────
 
 sep = "─" * 60
