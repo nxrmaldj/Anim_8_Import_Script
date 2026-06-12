@@ -1,46 +1,480 @@
 # script_2_sequence.py
 # Level Sequence Builder — run AFTER script_1_organize.py has routed assets
-# into shot folders.
+# into shot folders. Full design: SCRIPT_2_PLAN.md
 #
-# STATUS: not yet implemented. Build spec agreed and documented in
-# SCRIPT_2_PLAN.md — read that file for the full design.
-#
-# Planned run flow:
-#   1. Project selector  — list folders under /Game/Production/, user picks one
-#   2. Camera picker     — folder dialog for the Maya export folder on disk
-#                          (scanned for Shot##_Camera_anim.fbx files)
-#   3. Shot discovery    — every Shot## folder under the chosen project
-#   4. Per shot:
-#        - Create Level Sequence  Shot##_{ProjectName}  in Shot##/
-#        - SKIP the shot if a sequence with that name already exists
-#        - Add a Skeletal Mesh track per AnimSequence (skeleton looked up
-#          from the AnimSequence asset itself — no character dict)
-#        - Add a Geometry Cache track per GeometryCache asset
-#        - Spawn CineCamera named after the camera FBX (minus _anim)
-#        - Add Camera Cut track
-#        - Import camera FBX with match_by_name_only = False
-#        - No camera FBX found → build without camera track, log warning
-#   5. Log summary
+# From the Unreal Python console:
+#   import sys; sys.path.append("A:/Anim_8_Scripts")
+#   import script_2_sequence
+#   script_2_sequence.run(dry_run=True)                      # full plan, builds nothing
+#   script_2_sequence.run(shot_filter="Shot01", dry_run=False)  # build one shot only
+#   script_2_sequence.run(dry_run=False)                     # build everything
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
 
 PROJECT_ROOT = "/Game/Production"
 ASSETS_ROOT  = "/Game/Assets"
 
+# Sequence display rate (frames per second) used when creating new sequences
+SEQUENCE_FPS = 24
+
 # ─── END CONFIG ──────────────────────────────────────────────────────────────
 
+import os
+import re
 import unreal
 
+_SHOT_RE      = re.compile(r'^Shot\d+[A-Za-z]?$', re.IGNORECASE)
+_CAMERA_FBX_RE = re.compile(r'^(Shot\d+[A-Za-z]?)_Camera_anim\.fbx$', re.IGNORECASE)
 
-def run(project_name="", camera_folder="", dry_run=False):
-    """
-    Build Level Sequences for every shot in the chosen project.
 
-      project_name   blank → selection dialog listing /Game/Production/ folders
-      camera_folder  blank → folder picker for the Maya export folder
-      dry_run        True  → log the full build plan without creating anything
+# ─── PURE HELPERS (testable outside UE) ─────────────────────────────────────
+
+def is_shot_folder(name):
+    """True when a folder name looks like Shot01 / Shot11A."""
+    return bool(_SHOT_RE.match(name))
+
+
+def camera_name_for(camera_fbx_filename):
+    """'Shot01_Camera_anim.fbx' → 'Shot01_Camera' (the CineCamera actor name)."""
+    base = os.path.splitext(camera_fbx_filename)[0]
+    return re.sub(r'_anim$', '', base, flags=re.IGNORECASE)
+
+
+def find_camera_fbx(shot, camera_files):
     """
-    unreal.log("Script 2 — Level Sequence Builder: not yet implemented. See SCRIPT_2_PLAN.md")
+    Find the camera FBX filename for a shot in a list of filenames.
+    Matching is case-insensitive. Returns None when the shot has no camera.
+    """
+    target = f"{shot.lower()}_camera_anim.fbx"
+    for filename in camera_files:
+        if filename.lower() == target:
+            return filename
+    return None
+
+
+def sequence_name_for(shot, project):
+    """'Shot01', 'MyProject' → 'Shot01_MyProject'."""
+    return f"{shot}_{project}"
+
+
+# ─── DIALOGS ─────────────────────────────────────────────────────────────────
+
+def pick_folder(title="Select Maya Export Folder (camera FBX files)"):
+    """Native folder picker. tkinter first, PowerShell fallback. '' on cancel."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes("-topmost", True)
+        folder = filedialog.askdirectory(title=title, parent=root)
+        root.destroy()
+        return folder.replace("\\", "/") if folder else ""
+    except Exception:
+        pass
+
+    try:
+        import subprocess
+        ps = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$d = New-Object System.Windows.Forms.FolderBrowserDialog; "
+            f"$d.Description = '{title}'; "
+            "if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath } else { '' }"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True, text=True, timeout=120
+        )
+        return result.stdout.strip().replace("\\", "/")
+    except Exception:
+        pass
+
+    return ""
+
+
+def ask_choice(options, title="Select Project"):
+    """
+    Show a list of options and let the user pick one.
+    Returns the chosen string, or '' on cancel.
+    """
+    if len(options) == 1:
+        return options[0]
+
+    try:
+        import tkinter as tk
+        chosen = {"value": ""}
+
+        root = tk.Tk()
+        root.title(title)
+        root.wm_attributes("-topmost", True)
+        root.geometry("360x320")
+
+        tk.Label(root, text="Select the project to build sequences for:").pack(pady=8)
+
+        listbox = tk.Listbox(root)
+        for option in options:
+            listbox.insert(tk.END, option)
+        listbox.selection_set(0)
+        listbox.pack(fill=tk.BOTH, expand=True, padx=12)
+
+        def confirm():
+            selection = listbox.curselection()
+            if selection:
+                chosen["value"] = listbox.get(selection[0])
+            root.destroy()
+
+        tk.Button(root, text="OK", command=confirm).pack(pady=8)
+        root.mainloop()
+        return chosen["value"]
+    except Exception:
+        pass
+
+    # PowerShell fallback: numbered choice via InputBox
+    try:
+        import subprocess
+        menu = "; ".join(f"{i + 1} = {name}" for i, name in enumerate(options))
+        ps = (
+            "[System.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic') | Out-Null; "
+            f"[Microsoft.VisualBasic.Interaction]::InputBox('Type the number of the project: {menu}', '{title}', '1')"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True, text=True, timeout=120
+        )
+        index = int(result.stdout.strip()) - 1
+        if 0 <= index < len(options):
+            return options[index]
+    except Exception:
+        pass
+
+    return ""
+
+
+# ─── UNREAL HELPERS ──────────────────────────────────────────────────────────
+
+def get_asset_class_name(asset_data):
+    try:
+        return str(asset_data.asset_class_path.asset_name)   # UE 5.1+
+    except AttributeError:
+        return str(asset_data.asset_class)                   # older
+
+
+def list_project_folders():
+    """Return the names of all folders directly under /Game/Production/."""
+    subpaths = unreal.EditorAssetLibrary.list_assets(
+        PROJECT_ROOT, recursive=False, include_folder=True
+    )
+    folders = []
+    for path in subpaths:
+        path = str(path).rstrip("/")
+        if "." not in path.rsplit("/", 1)[-1]:
+            folders.append(path.rsplit("/", 1)[-1])
+    return sorted(folders)
+
+
+def list_shot_folders(project):
+    """Return shot folder names under /Game/Production/{project}/."""
+    base = f"{PROJECT_ROOT}/{project}"
+    subpaths = unreal.EditorAssetLibrary.list_assets(
+        base, recursive=False, include_folder=True
+    )
+    shots = []
+    for path in subpaths:
+        name = str(path).rstrip("/").rsplit("/", 1)[-1]
+        if "." not in name and is_shot_folder(name):
+            shots.append(name)
+    return sorted(shots)
+
+
+def collect_shot_assets(project, shot):
+    """
+    Scan Shot##/Animation/ and return (anim_sequences, geometry_caches)
+    as lists of asset package paths.
+    """
+    folder = f"{PROJECT_ROOT}/{project}/{shot}/Animation"
+    anims, caches = [], []
+
+    if not unreal.EditorAssetLibrary.does_directory_exist(folder):
+        return anims, caches
+
+    for object_path in unreal.EditorAssetLibrary.list_assets(folder, recursive=True, include_folder=False):
+        asset_data = unreal.EditorAssetLibrary.find_asset_data(object_path)
+        class_name = get_asset_class_name(asset_data)
+        package    = str(object_path).split(".")[0]
+        if class_name == "AnimSequence":
+            anims.append(package)
+        elif class_name == "GeometryCache":
+            caches.append(package)
+
+    return sorted(anims), sorted(caches)
+
+
+# ─── SEQUENCE BUILDING ───────────────────────────────────────────────────────
+
+def create_level_sequence(package_path, asset_name):
+    """Create and return a new LevelSequence asset."""
+    asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
+    sequence = asset_tools.create_asset(
+        asset_name=asset_name,
+        package_path=package_path,
+        asset_class=unreal.LevelSequence,
+        factory=unreal.LevelSequenceFactoryNew()
+    )
+    if sequence:
+        fps = unreal.FrameRate(SEQUENCE_FPS, 1)
+        sequence.set_display_rate(fps)
+    return sequence
+
+
+def add_anim_track(sequence, anim_package):
+    """
+    Bind the skeletal mesh referenced by an AnimSequence into the sequence
+    and add an animation track playing that AnimSequence.
+    Returns (ok, message).
+    """
+    anim = unreal.load_asset(anim_package)
+    if anim is None:
+        return False, f"could not load {anim_package}"
+
+    skeleton = anim.get_editor_property("skeleton")
+    if skeleton is None:
+        return False, f"{anim.get_name()} has no skeleton"
+
+    # Find a SkeletalMesh compatible with this skeleton to spawn in the binding
+    skeletal_mesh = None
+    registry = unreal.AssetRegistryHelpers.get_asset_registry()
+    for asset_data in registry.get_assets_by_class(
+        unreal.TopLevelAssetPath("/Script/Engine", "SkeletalMesh"), True
+    ):
+        candidate = asset_data.get_asset()
+        if candidate and candidate.skeleton == skeleton:
+            skeletal_mesh = candidate
+            break
+
+    if skeletal_mesh is None:
+        return False, f"no SkeletalMesh found for skeleton {skeleton.get_name()}"
+
+    # Spawnable binding from the skeletal mesh, with an animation track
+    binding = sequence.add_spawnable_from_instance(skeletal_mesh)
+    anim_track = binding.add_track(unreal.MovieSceneSkeletalAnimationTrack)
+    section = anim_track.add_section()
+    section.params.animation = anim
+
+    frame_rate = sequence.get_display_rate()
+    duration_frames = int(anim.get_editor_property("sequence_length") * frame_rate.numerator / frame_rate.denominator)
+    section.set_range(0, max(duration_frames, 1))
+
+    binding.set_display_name(anim.get_name())
+    return True, f"track for {anim.get_name()} (mesh: {skeletal_mesh.get_name()})"
+
+
+def add_geocache_track(sequence, cache_package):
+    """Add a Geometry Cache spawnable + track to the sequence. Returns (ok, message)."""
+    cache = unreal.load_asset(cache_package)
+    if cache is None:
+        return False, f"could not load {cache_package}"
+
+    binding = sequence.add_spawnable_from_instance(cache)
+    track = binding.add_track(unreal.MovieSceneGeometryCacheTrack)
+    section = track.add_section()
+
+    frame_rate = sequence.get_display_rate()
+    try:
+        duration_seconds = cache.calculate_duration()
+    except Exception:
+        duration_seconds = 0
+    duration_frames = int(duration_seconds * frame_rate.numerator / frame_rate.denominator)
+    section.set_range(0, max(duration_frames, 1))
+
+    binding.set_display_name(cache.get_name())
+    return True, f"geo cache track for {cache.get_name()}"
+
+
+def add_camera(sequence, camera_fbx_path, camera_name):
+    """
+    Spawn a CineCamera into the sequence, add a Camera Cut track, and import
+    the camera FBX onto it with match_by_name_only disabled.
+    Returns (ok, message).
+    """
+    # Spawnable CineCamera
+    camera_actor_class = unreal.CineCameraActor
+    binding = sequence.add_spawnable_from_class(camera_actor_class)
+    binding.set_display_name(camera_name)
+
+    # Camera Cut track bound to the camera
+    cut_track = sequence.add_track(unreal.MovieSceneCameraCutTrack)
+    cut_section = cut_track.add_section()
+    binding_id = unreal.MovieSceneObjectBindingID()
+    try:
+        binding_id = sequence.get_binding_id(binding)        # UE 5.4+
+    except Exception:
+        binding_id = sequence.make_binding_id(binding, unreal.MovieSceneObjectBindingSpace.LOCAL)
+    cut_section.set_camera_binding_id(binding_id)
+
+    # Import the FBX animation onto the camera binding
+    settings = unreal.MovieSceneUserImportFBXSettings()
+    settings.set_editor_property("match_by_name_only", False)
+    settings.set_editor_property("create_cameras", False)
+    settings.set_editor_property("reduce_keys", False)
+    settings.set_editor_property("force_front_x_axis", False)
+
+    world = unreal.UnrealEditorSubsystem().get_editor_world()
+
+    try:
+        ok = unreal.SequencerTools.import_level_sequence_fbx(
+            world, sequence, [binding], settings, camera_fbx_path
+        )
+    except Exception as exc:
+        return False, f"camera FBX import failed: {exc}"
+
+    if not ok:
+        return False, "camera FBX import returned False"
+
+    return True, f"camera '{camera_name}' imported from {os.path.basename(camera_fbx_path)}"
+
+
+# ─── MAIN ────────────────────────────────────────────────────────────────────
+
+def run(project_name="", camera_folder="", shot_filter="", dry_run=False):
+    """
+    Build Level Sequences for shots in the chosen project.
+
+      project_name   blank → selection dialog of /Game/Production/ folders
+      camera_folder  blank → folder picker for the Maya camera FBX exports
+      shot_filter    e.g. "Shot01" → build only that shot ("" = all shots)
+      dry_run        True → log the full build plan without creating anything
+    """
+    sep = "=" * 60
+
+    # ── Resolve project ──────────────────────────────────────────────────────
+    projects = list_project_folders()
+    if not projects:
+        unreal.log_error(f"No project folders found under {PROJECT_ROOT}")
+        return
+
+    project = project_name.strip() or ask_choice(projects)
+    if not project:
+        unreal.log_warning("No project selected — aborting.")
+        return
+    if project not in projects:
+        unreal.log_error(f"Project '{project}' not found under {PROJECT_ROOT}. Found: {projects}")
+        return
+
+    # ── Resolve camera folder ────────────────────────────────────────────────
+    cam_folder = camera_folder.strip() or pick_folder()
+    camera_files = []
+    if cam_folder and os.path.isdir(cam_folder):
+        camera_files = [f for f in os.listdir(cam_folder) if _CAMERA_FBX_RE.match(f)]
+    else:
+        unreal.log_warning("No camera folder selected — sequences will be built without cameras.")
+        cam_folder = ""
+
+    # ── Discover shots ───────────────────────────────────────────────────────
+    shots = list_shot_folders(project)
+    if shot_filter:
+        shots = [s for s in shots if s.lower() == shot_filter.strip().lower()]
+
+    if not shots:
+        unreal.log_warning(
+            f"No shot folders found for project '{project}'"
+            + (f" matching filter '{shot_filter}'" if shot_filter else "")
+        )
+        return
+
+    unreal.log(f"\n{sep}")
+    unreal.log("Script 2 — Level Sequence Builder")
+    unreal.log(f"Project : {project}")
+    unreal.log(f"Cameras : {cam_folder or '(none)'}  ({len(camera_files)} camera FBX found)")
+    unreal.log(f"Shots   : {len(shots)}" + (f"  (filtered to {shot_filter})" if shot_filter else ""))
+    if dry_run:
+        unreal.log("Mode    : DRY RUN — nothing will be created")
+    unreal.log(sep)
+
+    counts = {"built": 0, "skipped": 0, "errors": 0}
+
+    for shot in shots:
+        shot_folder   = f"{PROJECT_ROOT}/{project}/{shot}"
+        seq_name      = sequence_name_for(shot, project)
+        seq_path      = f"{shot_folder}/{seq_name}"
+
+        unreal.log(f"\n  {shot}")
+
+        # Skip rule: sequence with the same name already exists
+        if unreal.EditorAssetLibrary.does_asset_exist(seq_path):
+            unreal.log(f"    → SKIPPED — {seq_name} already exists")
+            counts["skipped"] += 1
+            continue
+
+        anims, caches = collect_shot_assets(project, shot)
+        camera_fbx    = find_camera_fbx(shot, camera_files)
+
+        unreal.log(f"    anims={len(anims)}  geo caches={len(caches)}  camera={'yes' if camera_fbx else 'NO'}")
+
+        if not anims and not caches and not camera_fbx:
+            unreal.log_warning(f"    → SKIPPED — nothing to add for {shot}")
+            counts["skipped"] += 1
+            continue
+
+        if dry_run:
+            unreal.log(f"    [DRY RUN] Would create: {seq_path}")
+            for a in anims:
+                unreal.log(f"    [DRY RUN]   + anim track    : {a.rsplit('/', 1)[-1]}")
+            for c in caches:
+                unreal.log(f"    [DRY RUN]   + geo cache     : {c.rsplit('/', 1)[-1]}")
+            if camera_fbx:
+                unreal.log(f"    [DRY RUN]   + camera        : {camera_name_for(camera_fbx)} (match_by_name_only=False)")
+            else:
+                unreal.log(f"    [DRY RUN]   ! no camera FBX — sequence without Camera Cut track")
+            counts["built"] += 1
+            continue
+
+        # ── Real build ───────────────────────────────────────────────────────
+        try:
+            sequence = create_level_sequence(shot_folder, seq_name)
+            if sequence is None:
+                unreal.log_error(f"    ✗ Could not create sequence {seq_path}")
+                counts["errors"] += 1
+                continue
+
+            for anim_package in anims:
+                ok, msg = add_anim_track(sequence, anim_package)
+                if ok:
+                    unreal.log(f"    ✓ {msg}")
+                else:
+                    unreal.log_warning(f"    ! anim skipped — {msg}")
+
+            for cache_package in caches:
+                ok, msg = add_geocache_track(sequence, cache_package)
+                if ok:
+                    unreal.log(f"    ✓ {msg}")
+                else:
+                    unreal.log_warning(f"    ! geo cache skipped — {msg}")
+
+            if camera_fbx:
+                fbx_path = f"{cam_folder}/{camera_fbx}"
+                ok, msg = add_camera(sequence, fbx_path, camera_name_for(camera_fbx))
+                if ok:
+                    unreal.log(f"    ✓ {msg}")
+                else:
+                    unreal.log_warning(f"    ! camera failed — {msg}")
+            else:
+                unreal.log_warning(f"    ! no camera FBX for {shot} — built without Camera Cut track")
+
+            unreal.EditorAssetLibrary.save_asset(seq_path)
+            unreal.log(f"    ✓ Created {seq_path}")
+            counts["built"] += 1
+
+        except Exception as exc:
+            unreal.log_error(f"    ✗ Error building {shot}: {exc}")
+            counts["errors"] += 1
+
+    unreal.log(f"\n{sep}")
+    unreal.log(
+        f"Done — Built: {counts['built']}  "
+        f"Skipped: {counts['skipped']}  "
+        f"Errors: {counts['errors']}"
+    )
+    unreal.log(sep + "\n")
 
 
 if __name__ == '__main__':
