@@ -83,15 +83,27 @@ Pin wiring:
 | `fps` | `FpsCombo` → Get Selected Option |
 | `dry` | `SequenceDryRunCheckbox` → Is Checked → Select String (A=`True`, B=`False`) |
 | `ow` | `OverwriteCheckbox` → Is Checked → Select String (A=`True`, B=`False`) |
-| `pick` | `AllShotsCheckbox` → Is Checked → **invert** → Select String (unchecked=`True`, checked=`False`) |
+| `pick` | `AllShotsCheckbox` → Is Checked → Select String **Pick A** pin. A=`False`, B=`True` (checked = all shots, unchecked = open picker) |
 
 ---
 
 ## Behavior Notes
 
-- **All Shots checkbox** — checked (default) builds every shot. Unchecked opens a
-  scrollable checkbox list of all shots (all pre-checked; uncheck what you skip).
-  Much easier than typing 42 shot names.
+**All Shots checkbox → `{pick}` pin (no NOT node needed):**
+
+```
+AllShotsCheckbox → Is Checked ──► Select String (Pick A)
+                                  A = False
+                                  B = True
+                                  Return Value → {pick}
+```
+
+- Checkbox **checked** → Pick A → `False` → build all shots
+- Checkbox **unchecked** → Pick B → `True` → opens the shot checkbox dialog
+
+Add a **Select String** node (same type you used for Dry Run). Set **A** to `False` and **B** to `True`. Plug **Is Checked** into **Pick A** — when the box is checked, Pick A is true and you get `False`; when unchecked, you get `True`.
+
+Do **not** use "Invert Select Mesh" — that is unrelated.
 - **Blank project name** uses the **open Unreal project name** (your `.uproject`
   file). Script 1 always uses it for `/Game/Production/{name}/`. Script 2 uses
   it only if that folder already exists under Production; otherwise the
