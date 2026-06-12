@@ -79,3 +79,29 @@ def pick_folder(title="Select Maya Export Folder (camera FBX files)"):
         pass
 
     return ""
+
+
+_last_camera_folder = ""
+
+
+def set_last_camera_folder(path):
+    """Store the camera export folder path for the next Script 2 run."""
+    global _last_camera_folder
+    _last_camera_folder = (path or "").strip().replace("\\", "/")
+
+
+def get_last_camera_folder():
+    """Return the last camera folder picked in this editor session."""
+    return _last_camera_folder
+
+
+def browse_camera_folder():
+    """
+    Open the folder picker and remember the result for Script 2.
+    Returns the selected path, or '' if cancelled.
+    """
+    path = pick_folder(title="Select Camera Export Folder (Shot##_cam.fbx)")
+    if path:
+        set_last_camera_folder(path)
+        unreal.log(f"Camera export folder set: {path}")
+    return path

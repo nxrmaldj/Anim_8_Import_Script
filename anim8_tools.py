@@ -1,28 +1,29 @@
 # anim8_tools.py
 # Blueprint-callable helpers for the Editor Utility Widget.
 #
-# First time in a session, run once in the Python console so nodes appear:
+# If "Browse Camera Export Folder" does not appear in the Graph search:
+#   Use the Execute Python Command on Find Camera Folder (see WIDGET_GUIDE.md Plan B)
+#
+# To try loading the Blueprint node (once per session):
 #   import sys; sys.path.append("A:/Anim_8_Scripts"); import anim8_tools
 #
-# Widget: Find Camera Folder button → Browse Camera Export Folder → Set Text
+# For the node to appear every editor launch, copy this file + pipeline_common.py
+# into your project's Content/Python/ folder.
 
 import unreal
 
-from pipeline_common import pick_folder
+from pipeline_common import browse_camera_folder
 
 
 @unreal.uclass()
 class Anim8PipelineTools(unreal.BlueprintFunctionLibrary):
     """Anim8 pipeline actions exposed to Editor Utility Widget Blueprints."""
 
-    @unreal.ufunction(static=True, ret=str, category="Anim8 Pipeline")
+    @unreal.ufunction(static=True, ret=str, category="Anim8 Pipeline", call_in_editor=True)
     def browse_camera_export_folder():
         """
         Open a folder picker for Maya camera FBX exports.
         Returns the selected path as a string (empty if cancelled).
-        Wire Return Value → Set Text on the Camera Folder input.
+        Wire Return Value → Conv String to Text → Set Text (CameraFolderInput).
         """
-        path = pick_folder(title="Select Camera Export Folder (Shot##_cam.fbx)")
-        if path:
-            unreal.log(f"Camera export folder: {path}")
-        return path
+        return browse_camera_folder()

@@ -183,24 +183,54 @@ import sys; sys.path.append("A:/Anim_8_Scripts"); import script_1_organize, impo
 
 ### Button 2 — FindCameraFolderButton
 
-**No Execute Python Command.** Pure Blueprint + one Python-exposed node.
+Use **Plan B** if you cannot find **Browse Camera Export Folder** in the graph search
+(most common when scripts live on `A:/` instead of inside the project).
+
+**Delete any wrong nodes** such as `Sync Browser to Folders` or `Get Camera Param Option` —
+those are unrelated Unreal nodes, not part of this pipeline.
+
+---
+
+#### Plan B — Execute Python Command (recommended)
 
 ```
-On Clicked (FindCameraFolderButton) ──exec──► (optional, data chain only)
-
-Browse Camera Export Folder
-    Return Value (String)
-        → Conv String to Text
-            → Set Text (Target: CameraFolderInput)
+On Clicked (FindCameraFolderButton) ──exec──► Execute Python Command
 ```
 
-**Steps:**
-1. **On Clicked** on `FindCameraFolderButton`
-2. Add node **Browse Camera Export Folder** (category: Anim8 Pipeline)
-3. Drag **Return Value** → **Conv String to Text**
-4. Drag result → **Set Text** on `CameraFolderInput`
+**Python Command** — paste this single line:
 
-User clicks the button → folder picker opens → path appears in the text box.
+```
+import sys; sys.path.append("A:/Anim_8_Scripts"); import pipeline_common as pc, importlib; importlib.reload(pc); pc.browse_camera_folder()
+```
+
+What happens:
+1. Folder picker opens
+2. Script remembers the path for **Build Sequences**
+3. Output Log shows: `Camera export folder set: G:/your/path`
+
+**Optional:** copy that path from the log into **Camera Folder** text box so you can see it in the UI.
+Build Sequences works either way — text box **or** last picked folder.
+
+---
+
+#### Plan A — Browse Camera Export Folder node (optional)
+
+Only works if Unreal registers the Python Blueprint library.
+
+**One-time per session** — Python console:
+
+```python
+import sys; sys.path.append("A:/Anim_8_Scripts"); import anim8_tools
+```
+
+Then search the graph for **`Browse Camera Export Folder`** (category: **Anim8 Pipeline**).
+
+```
+On Clicked → Browse Camera Export Folder → Conv String to Text → Set Text (CameraFolderInput)
+```
+
+**To make Plan A appear every launch:** copy `anim8_tools.py` and `pipeline_common.py`
+into your project's `Content/Python/` folder and restart the editor.
 
 ---
 

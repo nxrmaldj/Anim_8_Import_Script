@@ -23,7 +23,7 @@ import os
 import re
 import unreal
 
-from pipeline_common import get_open_project_name, resolve_production_project
+from pipeline_common import get_open_project_name, resolve_production_project, get_last_camera_folder
 
 _SHOT_RE = re.compile(r'^Shot\d+[A-Za-z]?$', re.IGNORECASE)
 
@@ -528,13 +528,13 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
         unreal.log_error(f"Project '{project}' not found under {PROJECT_ROOT}. Found: {projects}")
         return
 
-    # ── Camera folder (from widget — set via Find Camera Folder button) ──────
-    cam_folder = camera_folder.strip()
+    # ── Camera folder (from widget text box, or last Find Camera Folder pick) ─
+    cam_folder = camera_folder.strip() or get_last_camera_folder()
     camera_files = []
     if not cam_folder:
         unreal.log_warning(
-            "No camera folder set — click Find Camera Folder in the widget first. "
-            "Sequences will be built without cameras."
+            "No camera folder set — click Find Camera Folder first, or paste a path "
+            "into the Camera Folder field. Sequences will be built without cameras."
         )
     elif os.path.isdir(cam_folder):
         camera_files = [f for f in os.listdir(cam_folder) if _CAMERA_FBX_RE.match(f)]
