@@ -327,9 +327,22 @@ def add_camera(sequence, camera_fbx_path, camera_name, duration_frames=0):
     the shot, and import the camera FBX onto it with match_by_name_only
     disabled. Returns (ok, message).
     """
-    # Spawnable CineCamera
-    camera_actor_class = unreal.CineCameraActor
-    binding = sequence.add_spawnable_from_class(camera_actor_class)
+    # Spawnable CineCamera with focus disabled (spawn temp actor, configure,
+    # build spawnable from it, destroy temp)
+    actor_subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    temp_camera = actor_subsystem.spawn_actor_from_class(
+        unreal.CineCameraActor, unreal.Vector(0, 0, 0), unreal.Rotator(0, 0, 0)
+    )
+    if temp_camera is None:
+        return False, "could not spawn CineCameraActor"
+
+    cine_component = temp_camera.get_cine_camera_component()
+    focus_settings = cine_component.get_editor_property("focus_settings")
+    focus_settings.focus_method = unreal.CameraFocusMethod.DISABLE
+    cine_component.set_editor_property("focus_settings", focus_settings)
+
+    binding = sequence.add_spawnable_from_instance(temp_camera)
+    actor_subsystem.destroy_actor(temp_camera)
     binding.set_display_name(camera_name)
 
     # Camera Cut track bound to the camera, covering the whole shot
