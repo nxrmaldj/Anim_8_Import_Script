@@ -406,6 +406,8 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
     unreal.log(sep)
 
     counts = {"built": 0, "skipped": 0, "errors": 0}
+    missing_cameras = []   # shots that have assets but no camera FBX
+    empty_folders   = []   # shots whose Animation folder has nothing usable
 
     for shot in shots:
         shot_folder   = f"{PROJECT_ROOT}/{project}/{shot}"
@@ -424,6 +426,12 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
         camera_fbx    = find_camera_fbx(shot, camera_files)
 
         unreal.log(f"    anims={len(anims)}  geo caches={len(caches)}  camera={'yes' if camera_fbx else 'NO'}")
+
+        if not anims and not caches:
+            empty_folders.append(shot)
+
+        if not camera_fbx:
+            missing_cameras.append(shot)
 
         if not anims and not caches and not camera_fbx:
             unreal.log_warning(f"    → SKIPPED — nothing to add for {shot}")
@@ -499,6 +507,22 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
         f"Skipped: {counts['skipped']}  "
         f"Errors: {counts['errors']}"
     )
+
+    # ── Health check ─────────────────────────────────────────────────────────
+    if missing_cameras:
+        unreal.log_warning(
+            f"Cameras missing : {len(missing_cameras)}  ({', '.join(missing_cameras)})"
+        )
+    else:
+        unreal.log("Cameras missing : none")
+
+    if empty_folders:
+        unreal.log_warning(
+            f"Empty folders   : {len(empty_folders)}  ({', '.join(empty_folders)})"
+        )
+    else:
+        unreal.log("Empty folders   : 0")
+
     unreal.log(sep + "\n")
 
 
