@@ -54,20 +54,24 @@ check("Shot01_Camera_anim.fbx → Shot01_Camera",
 check("Shot11A_Camera_ANIM.fbx → Shot11A_Camera (case)",
       s2.camera_name_for("Shot11A_Camera_ANIM.fbx"), "Shot11A_Camera")
 
+check("Shot01_cam.fbx → Shot01_cam",
+      s2.camera_name_for("Shot01_cam.fbx"), "Shot01_cam")
+
 # ─── find_camera_fbx ─────────────────────────────────────────────────────────
 
 print("\n── find_camera_fbx ──────────────────────────────────────────────────────")
 
-files = ["Shot01_Camera_anim.fbx", "Shot02_Camera_anim.fbx", "Shot11A_Camera_anim.fbx"]
+# Production naming: Shot##_cam.fbx
+files = ["Shot01_cam.fbx", "Shot02_cam.fbx", "Shot11A_cam.fbx"]
 
-check("Shot01 matches its camera",
-      s2.find_camera_fbx("Shot01", files), "Shot01_Camera_anim.fbx")
+check("Shot01 matches Shot01_cam.fbx",
+      s2.find_camera_fbx("Shot01", files), "Shot01_cam.fbx")
 
 check("Shot11A matches letter-suffix camera",
-      s2.find_camera_fbx("Shot11A", files), "Shot11A_Camera_anim.fbx")
+      s2.find_camera_fbx("Shot11A", files), "Shot11A_cam.fbx")
 
 check("shot02 case-insensitive match",
-      s2.find_camera_fbx("shot02", files), "Shot02_Camera_anim.fbx")
+      s2.find_camera_fbx("shot02", files), "Shot02_cam.fbx")
 
 check("Shot99 has no camera → None",
       s2.find_camera_fbx("Shot99", files), None)
@@ -75,18 +79,32 @@ check("Shot99 has no camera → None",
 check("empty file list → None",
       s2.find_camera_fbx("Shot01", []), None)
 
+# Legacy naming still works
+legacy = ["Shot01_Camera_anim.fbx"]
+check("legacy Shot01_Camera_anim.fbx still matches",
+      s2.find_camera_fbx("Shot01", legacy), "Shot01_Camera_anim.fbx")
+
 # ─── camera FBX filename regex (used at scan time) ──────────────────────────
 
 print("\n── camera filename regex ────────────────────────────────────────────────")
 
-check("Shot01_Camera_anim.fbx matches",
+check("Shot01_cam.fbx matches",
+      bool(s2._CAMERA_FBX_RE.match("Shot01_cam.fbx")), True)
+
+check("Shot01_CAM.fbx matches (case)",
+      bool(s2._CAMERA_FBX_RE.match("Shot01_CAM.fbx")), True)
+
+check("Shot01_Camera_anim.fbx matches (legacy)",
       bool(s2._CAMERA_FBX_RE.match("Shot01_Camera_anim.fbx")), True)
+
+check("Shot01_cam_anim.fbx matches",
+      bool(s2._CAMERA_FBX_RE.match("Shot01_cam_anim.fbx")), True)
 
 check("Shot01_Kiiboh_anim.fbx does not match",
       bool(s2._CAMERA_FBX_RE.match("Shot01_Kiiboh_anim.fbx")), False)
 
-check("Shot01_Camera_anim_v2.fbx does not match (suffix after _anim)",
-      bool(s2._CAMERA_FBX_RE.match("Shot01_Camera_anim_v2.fbx")), False)
+check("Shot01_cam_v2.fbx does not match (extra suffix)",
+      bool(s2._CAMERA_FBX_RE.match("Shot01_cam_v2.fbx")), False)
 
 # ─── sequence_name_for ───────────────────────────────────────────────────────
 

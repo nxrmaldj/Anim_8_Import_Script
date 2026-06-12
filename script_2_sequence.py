@@ -23,8 +23,12 @@ import os
 import re
 import unreal
 
-_SHOT_RE      = re.compile(r'^Shot\d+[A-Za-z]?$', re.IGNORECASE)
-_CAMERA_FBX_RE = re.compile(r'^(Shot\d+[A-Za-z]?)_Camera_anim\.fbx$', re.IGNORECASE)
+_SHOT_RE = re.compile(r'^Shot\d+[A-Za-z]?$', re.IGNORECASE)
+
+# Camera FBX filename patterns, e.g. Shot01_cam.fbx or Shot01_Camera_anim.fbx
+_CAMERA_FBX_RE = re.compile(
+    r'^(Shot\d+[A-Za-z]?)_(cam|camera)(_anim)?\.fbx$', re.IGNORECASE
+)
 
 
 # ─── PURE HELPERS (testable outside UE) ─────────────────────────────────────
@@ -43,11 +47,12 @@ def camera_name_for(camera_fbx_filename):
 def find_camera_fbx(shot, camera_files):
     """
     Find the camera FBX filename for a shot in a list of filenames.
+    Accepts Shot##_cam.fbx, Shot##_Camera_anim.fbx and similar variants.
     Matching is case-insensitive. Returns None when the shot has no camera.
     """
-    target = f"{shot.lower()}_camera_anim.fbx"
     for filename in camera_files:
-        if filename.lower() == target:
+        match = _CAMERA_FBX_RE.match(filename)
+        if match and match.group(1).lower() == shot.lower():
             return filename
     return None
 
@@ -211,8 +216,8 @@ def collect_shot_assets(project, shot):
 
 # ─── SEQUENCE BUILDING ───────────────────────────────────────────────────────
 
-def create_level_sequence(package_path, asset_name):
-    """Create and return a new LevelSequence asset."""
+def create_level_sequence(package_path, asset_name, fps=SEQUENCE_FPS):
+    """Create and return a new LevelSequence asset at the given frame rate."""
     asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
     sequence = asset_tools.create_asset(
         asset_name=asset_name,
@@ -221,8 +226,7 @@ def create_level_sequence(package_path, asset_name):
         factory=unreal.LevelSequenceFactoryNew()
     )
     if sequence:
-        fps = unreal.FrameRate(SEQUENCE_FPS, 1)
-        sequence.set_display_rate(fps)
+        sequence.set_display_rate(unreal.FrameRate(fps, 1))
     return sequence
 
 
@@ -230,15 +234,15 @@ def add_anim_track(sequence, anim_package):
     """
     Bind the skeletal mesh referenced by an AnimSequence into the sequence
     and add an animation track playing that AnimSequence.
-    Returns (ok, message).
+    Returns (ok, message, duration_frames).
     """
     anim = unreal.load_asset(anim_package)
     if anim is None:
-        return False, f"could not load {anim_package}"
+        return False, f"could not load {anim_package}", 0
 
     skeleton = anim.get_editor_property("skeleton")
     if skeleton is None:
-        return False, f"{anim.get_name()} has no skeleton"
+        return False, f"{anim.get_name()} has no skeleton", 0
 
     # Find a SkeletalMesh compatible with this skeleton to spawn in the binding
     skeletal_mesh = None
@@ -252,7 +256,7 @@ def add_anim_track(sequence, anim_package):
             break
 
     if skeletal_mesh is None:
-        return False, f"no SkeletalMesh found for skeleton {skeleton.get_name()}"
+        return False, f"no SkeletalMesh found for skeleton {skeleton.get_name()}", 0
 
     # Spawnable binding from the skeletal mesh, with an animation track
     binding = sequence.add_spawnable_from_instance(skeletal_mesh)
@@ -262,17 +266,21 @@ def add_anim_track(sequence, anim_package):
 
     frame_rate = sequence.get_display_rate()
     duration_frames = int(anim.get_editor_property("sequence_length") * frame_rate.numerator / frame_rate.denominator)
-    section.set_range(0, max(duration_frames, 1))
+    duration_frames = max(duration_frames, 1)
+    section.set_range(0, duration_frames)
 
     binding.set_display_name(anim.get_name())
-    return True, f"track for {anim.get_name()} (mesh: {skeletal_mesh.get_name()})"
+    return True, f"track for {anim.get_name()} (mesh: {skeletal_mesh.get_name()})", duration_frames
 
 
 def add_geocache_track(sequence, cache_package):
-    """Add a Geometry Cache spawnable + track to the sequence. Returns (ok, message)."""
+    """
+    Add a Geometry Cache spawnable + track to the sequence.
+    Returns (ok, message, duration_frames).
+    """
     cache = unreal.load_asset(cache_package)
     if cache is None:
-        return False, f"could not load {cache_package}"
+        return False, f"could not load {cache_package}", 0
 
     binding = sequence.add_spawnable_from_instance(cache)
     track = binding.add_track(unreal.MovieSceneGeometryCacheTrack)
@@ -283,27 +291,29 @@ def add_geocache_track(sequence, cache_package):
         duration_seconds = cache.calculate_duration()
     except Exception:
         duration_seconds = 0
-    duration_frames = int(duration_seconds * frame_rate.numerator / frame_rate.denominator)
-    section.set_range(0, max(duration_frames, 1))
+    duration_frames = max(int(duration_seconds * frame_rate.numerator / frame_rate.denominator), 1)
+    section.set_range(0, duration_frames)
 
     binding.set_display_name(cache.get_name())
-    return True, f"geo cache track for {cache.get_name()}"
+    return True, f"geo cache track for {cache.get_name()}", duration_frames
 
 
-def add_camera(sequence, camera_fbx_path, camera_name):
+def add_camera(sequence, camera_fbx_path, camera_name, duration_frames=0):
     """
-    Spawn a CineCamera into the sequence, add a Camera Cut track, and import
-    the camera FBX onto it with match_by_name_only disabled.
-    Returns (ok, message).
+    Spawn a CineCamera into the sequence, add a Camera Cut track sized to
+    the shot, and import the camera FBX onto it with match_by_name_only
+    disabled. Returns (ok, message).
     """
     # Spawnable CineCamera
     camera_actor_class = unreal.CineCameraActor
     binding = sequence.add_spawnable_from_class(camera_actor_class)
     binding.set_display_name(camera_name)
 
-    # Camera Cut track bound to the camera
+    # Camera Cut track bound to the camera, covering the whole shot
     cut_track = sequence.add_track(unreal.MovieSceneCameraCutTrack)
     cut_section = cut_track.add_section()
+    if duration_frames > 0:
+        cut_section.set_range(0, duration_frames)
     binding_id = unreal.MovieSceneObjectBindingID()
     try:
         binding_id = sequence.get_binding_id(binding)        # UE 5.4+
@@ -335,7 +345,7 @@ def add_camera(sequence, camera_fbx_path, camera_name):
 
 # ─── MAIN ────────────────────────────────────────────────────────────────────
 
-def run(project_name="", camera_folder="", shot_filter="", dry_run=False):
+def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SEQUENCE_FPS):
     """
     Build Level Sequences for shots in the chosen project.
 
@@ -343,8 +353,12 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False):
       camera_folder  blank → folder picker for the Maya camera FBX exports
       shot_filter    e.g. "Shot01" → build only that shot ("" = all shots)
       dry_run        True → log the full build plan without creating anything
+      fps            sequence frame rate: 24, 30, or 60 (default 24)
     """
     sep = "=" * 60
+
+    if fps not in (24, 30, 60):
+        unreal.log_warning(f"Unusual fps value '{fps}' — using it anyway (expected 24, 30, or 60)")
 
     # ── Resolve project ──────────────────────────────────────────────────────
     projects = list_project_folders()
@@ -384,6 +398,7 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False):
     unreal.log(f"\n{sep}")
     unreal.log("Script 2 — Level Sequence Builder")
     unreal.log(f"Project : {project}")
+    unreal.log(f"FPS     : {fps}")
     unreal.log(f"Cameras : {cam_folder or '(none)'}  ({len(camera_files)} camera FBX found)")
     unreal.log(f"Shots   : {len(shots)}" + (f"  (filtered to {shot_filter})" if shot_filter else ""))
     if dry_run:
@@ -430,35 +445,45 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False):
 
         # ── Real build ───────────────────────────────────────────────────────
         try:
-            sequence = create_level_sequence(shot_folder, seq_name)
+            sequence = create_level_sequence(shot_folder, seq_name, fps)
             if sequence is None:
                 unreal.log_error(f"    ✗ Could not create sequence {seq_path}")
                 counts["errors"] += 1
                 continue
 
+            longest_frames = 0
+
             for anim_package in anims:
-                ok, msg = add_anim_track(sequence, anim_package)
+                ok, msg, frames = add_anim_track(sequence, anim_package)
                 if ok:
                     unreal.log(f"    ✓ {msg}")
+                    longest_frames = max(longest_frames, frames)
                 else:
                     unreal.log_warning(f"    ! anim skipped — {msg}")
 
             for cache_package in caches:
-                ok, msg = add_geocache_track(sequence, cache_package)
+                ok, msg, frames = add_geocache_track(sequence, cache_package)
                 if ok:
                     unreal.log(f"    ✓ {msg}")
+                    longest_frames = max(longest_frames, frames)
                 else:
                     unreal.log_warning(f"    ! geo cache skipped — {msg}")
 
             if camera_fbx:
                 fbx_path = f"{cam_folder}/{camera_fbx}"
-                ok, msg = add_camera(sequence, fbx_path, camera_name_for(camera_fbx))
+                ok, msg = add_camera(sequence, fbx_path, camera_name_for(camera_fbx), longest_frames)
                 if ok:
                     unreal.log(f"    ✓ {msg}")
                 else:
                     unreal.log_warning(f"    ! camera failed — {msg}")
             else:
                 unreal.log_warning(f"    ! no camera FBX for {shot} — built without Camera Cut track")
+
+            # Playback range = longest animation in the shot
+            if longest_frames > 0:
+                sequence.set_playback_start(0)
+                sequence.set_playback_end(longest_frames)
+                unreal.log(f"    ✓ playback range: 0–{longest_frames} frames ({fps} fps)")
 
             unreal.EditorAssetLibrary.save_asset(seq_path)
             unreal.log(f"    ✓ Created {seq_path}")
