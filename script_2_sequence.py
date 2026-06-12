@@ -532,7 +532,8 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
     Build Level Sequences for shots in the chosen project.
 
       project_name      blank → open Unreal project if folder exists under Production
-      camera_folder     blank → folder picker for the Maya camera FBX exports
+      camera_folder     optional disk path; if blank, folder picker opens immediately
+                        at the start of the run (before project selection)
       shot_filter       optional: "Shot01" or "Shot01,Shot05" (ignored when interactive_shots=True)
       interactive_shots True  → checkbox dialog to pick shots (all checked by default)
       dry_run           True  → log the full build plan without creating anything
@@ -543,6 +544,19 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
 
     if fps not in (24, 30, 60):
         unreal.log_warning(f"Unusual fps value '{fps}' — using it anyway (expected 24, 30, or 60)")
+
+    # ── Camera folder (picker opens first) ───────────────────────────────────
+    cam_folder = camera_folder.strip()
+    if not cam_folder:
+        cam_folder = pick_folder()
+    camera_files = []
+    if cam_folder and os.path.isdir(cam_folder):
+        camera_files = [f for f in os.listdir(cam_folder) if _CAMERA_FBX_RE.match(f)]
+    elif cam_folder:
+        unreal.log_error(f"Camera folder does not exist: {cam_folder}")
+        return
+    else:
+        unreal.log_warning("No camera folder selected — sequences will be built without cameras.")
 
     # ── Resolve project ──────────────────────────────────────────────────────
     projects = list_project_folders()
@@ -560,15 +574,6 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
     if project not in projects:
         unreal.log_error(f"Project '{project}' not found under {PROJECT_ROOT}. Found: {projects}")
         return
-
-    # ── Resolve camera folder ────────────────────────────────────────────────
-    cam_folder = camera_folder.strip() or pick_folder()
-    camera_files = []
-    if cam_folder and os.path.isdir(cam_folder):
-        camera_files = [f for f in os.listdir(cam_folder) if _CAMERA_FBX_RE.match(f)]
-    else:
-        unreal.log_warning("No camera folder selected — sequences will be built without cameras.")
-        cam_folder = ""
 
     # ── Discover shots ───────────────────────────────────────────────────────
     all_shots = list_shot_folders(project)

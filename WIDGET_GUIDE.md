@@ -42,7 +42,7 @@ sections: **Organize Staging** (Script 1) and **Build Sequences** (Script 2).
 | Widget type | Variable name | Notes |
 |---|---|---|
 | Editable Text Box | `SequenceProjectInput` | Optional — blank uses open UE project if folder exists; else picker |
-| Editable Text Box | `CameraFolderInput` | Optional — blank opens folder picker |
+| Editable Text Box | `CameraFolderInput` | Optional — leave blank; picker opens immediately on Run |
 | Check Box | `AllShotsCheckbox` | **Checked by default** — unchecked opens shot checkbox dialog on Run |
 | Combo Box (String) | `FpsCombo` | Options: `24`, `30`, `60`. Default `24` |
 | Check Box | `SequenceDryRunCheckbox` | Unchecked by default |
@@ -108,6 +108,9 @@ Do **not** use "Invert Select Mesh" — that is unrelated.
   file). Script 1 always uses it for `/Game/Production/{name}/`. Script 2 uses
   it only if that folder already exists under Production; otherwise the
   production-folder picker opens (with the UE project pre-selected if listed).
+- **Camera folder** — leave the widget field blank. The folder picker opens
+  **immediately** when you hit Run (before project selection). Only type a path
+  if you want to skip the picker.
 - **Overwrite checkbox** only arms the option — the Python script still shows
   the "Are you sure you want to OVERWRITE N sequences?" Yes/No prompt before
   deleting anything.
