@@ -66,39 +66,6 @@ def sequence_name_for(shot, project):
 
 # ─── DIALOGS ─────────────────────────────────────────────────────────────────
 
-def pick_folder(title="Select Maya Export Folder (camera FBX files)"):
-    """Native folder picker. tkinter first, PowerShell fallback. '' on cancel."""
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-        root = tk.Tk()
-        root.withdraw()
-        root.wm_attributes("-topmost", True)
-        folder = filedialog.askdirectory(title=title, parent=root)
-        root.destroy()
-        return folder.replace("\\", "/") if folder else ""
-    except Exception:
-        pass
-
-    try:
-        import subprocess
-        ps = (
-            "Add-Type -AssemblyName System.Windows.Forms; "
-            "$d = New-Object System.Windows.Forms.FolderBrowserDialog; "
-            f"$d.Description = '{title}'; "
-            "if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath } else { '' }"
-        )
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", ps],
-            capture_output=True, text=True, timeout=120
-        )
-        return result.stdout.strip().replace("\\", "/")
-    except Exception:
-        pass
-
-    return ""
-
-
 def ask_choice(options, title="Select Project", default=""):
     """
     Show a list of options and let the user pick one.
@@ -532,8 +499,7 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
     Build Level Sequences for shots in the chosen project.
 
       project_name      blank → open Unreal project if folder exists under Production
-      camera_folder     optional disk path; if blank, folder picker opens immediately
-                        at the start of the run (before project selection)
+      camera_folder     disk path from the widget (use Find Camera Folder button)
       shot_filter       optional: "Shot01" or "Shot01,Shot05" (ignored when interactive_shots=True)
       interactive_shots True  → checkbox dialog to pick shots (all checked by default)
       dry_run           True  → log the full build plan without creating anything
@@ -544,19 +510,6 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
 
     if fps not in (24, 30, 60):
         unreal.log_warning(f"Unusual fps value '{fps}' — using it anyway (expected 24, 30, or 60)")
-
-    # ── Camera folder (picker opens first) ───────────────────────────────────
-    cam_folder = camera_folder.strip()
-    if not cam_folder:
-        cam_folder = pick_folder()
-    camera_files = []
-    if cam_folder and os.path.isdir(cam_folder):
-        camera_files = [f for f in os.listdir(cam_folder) if _CAMERA_FBX_RE.match(f)]
-    elif cam_folder:
-        unreal.log_error(f"Camera folder does not exist: {cam_folder}")
-        return
-    else:
-        unreal.log_warning("No camera folder selected — sequences will be built without cameras.")
 
     # ── Resolve project ──────────────────────────────────────────────────────
     projects = list_project_folders()
@@ -573,6 +526,20 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
         return
     if project not in projects:
         unreal.log_error(f"Project '{project}' not found under {PROJECT_ROOT}. Found: {projects}")
+        return
+
+    # ── Camera folder (from widget — set via Find Camera Folder button) ──────
+    cam_folder = camera_folder.strip()
+    camera_files = []
+    if not cam_folder:
+        unreal.log_warning(
+            "No camera folder set — click Find Camera Folder in the widget first. "
+            "Sequences will be built without cameras."
+        )
+    elif os.path.isdir(cam_folder):
+        camera_files = [f for f in os.listdir(cam_folder) if _CAMERA_FBX_RE.match(f)]
+    else:
+        unreal.log_error(f"Camera folder does not exist: {cam_folder}")
         return
 
     # ── Discover shots ───────────────────────────────────────────────────────

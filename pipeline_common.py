@@ -43,3 +43,39 @@ def resolve_production_project(explicit="", production_folders=None):
         return ue_name
 
     return ""
+
+
+def pick_folder(title="Select Maya Export Folder (camera FBX files)"):
+    """
+    Open a native folder-picker dialog.
+    tkinter first, PowerShell WinForms fallback. Returns '' on cancel.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes("-topmost", True)
+        folder = filedialog.askdirectory(title=title, parent=root)
+        root.destroy()
+        return folder.replace("\\", "/") if folder else ""
+    except Exception:
+        pass
+
+    try:
+        import subprocess
+        ps = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$d = New-Object System.Windows.Forms.FolderBrowserDialog; "
+            f"$d.Description = '{title}'; "
+            "if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath } else { '' }"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True, text=True, timeout=120
+        )
+        return result.stdout.strip().replace("\\", "/")
+    except Exception:
+        pass
+
+    return ""

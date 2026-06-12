@@ -18,6 +18,7 @@ sections: **Organize Staging** (Script 1) and **Build Sequences** (Script 2).
 │  ── 2 · Build Level Sequences ─────────────   │
 │  Project Name   [____________________]        │  ← optional: blank = open UE project
 │  Camera Folder  [____________________]        │
+│  [ Find Camera Folder ]                       │
 │  [x] All Shots                                │  ← unchecked → checkbox picker on Run
 │  FPS            [ 24 ▼ ]                      │
 │  [ ] Dry Run                                  │
@@ -42,7 +43,8 @@ sections: **Organize Staging** (Script 1) and **Build Sequences** (Script 2).
 | Widget type | Variable name | Notes |
 |---|---|---|
 | Editable Text Box | `SequenceProjectInput` | Optional — blank uses open UE project if folder exists; else picker |
-| Editable Text Box | `CameraFolderInput` | Optional — leave blank; picker opens immediately on Run |
+| Editable Text Box | `CameraFolderInput` | Shows the path — filled by **Find Camera Folder** |
+| Button | `FindCameraFolderButton` | Opens folder picker → sets `CameraFolderInput` |
 | Check Box | `AllShotsCheckbox` | **Checked by default** — unchecked opens shot checkbox dialog on Run |
 | Combo Box (String) | `FpsCombo` | Options: `24`, `30`, `60`. Default `24` |
 | Check Box | `SequenceDryRunCheckbox` | Unchecked by default |
@@ -85,8 +87,27 @@ Pin wiring:
 | `ow` | `OverwriteCheckbox` → Is Checked → Select String (A=`True`, B=`False`) |
 | `pick` | `AllShotsCheckbox` → Is Checked → Select String **Pick A** pin. A=`False`, B=`True` (checked = all shots, unchecked = open picker) |
 
----
+### Button 3 — FindCameraFolderButton → OnClicked
 
+**One-time setup** (once per editor session) — run in the Python console so the
+Blueprint node appears:
+
+```python
+import sys; sys.path.append("A:/Anim_8_Scripts"); import anim8_tools
+```
+
+Then wire the button:
+
+```
+FindCameraFolderButton  On Clicked
+    →  Browse Camera Export Folder   (category: Anim8 Pipeline)
+    →  Return Value  →  Conv String to Text  →  Set Text (CameraFolderInput)
+```
+
+No Execute Python Command needed for this button — the Blueprint node opens the
+picker and returns the path as a string.
+
+---
 ## Behavior Notes
 
 **All Shots checkbox → `{pick}` pin (no NOT node needed):**
@@ -108,9 +129,9 @@ Do **not** use "Invert Select Mesh" — that is unrelated.
   file). Script 1 always uses it for `/Game/Production/{name}/`. Script 2 uses
   it only if that folder already exists under Production; otherwise the
   production-folder picker opens (with the UE project pre-selected if listed).
-- **Camera folder** — leave the widget field blank. The folder picker opens
-  **immediately** when you hit Run (before project selection). Only type a path
-  if you want to skip the picker.
+- **Camera folder** — click **Find Camera Folder** first. The picker opens,
+  you select the export folder, and the path appears in the text box. **Build
+  Sequences** then uses that path (no picker on Run).
 - **Overwrite checkbox** only arms the option — the Python script still shows
   the "Are you sure you want to OVERWRITE N sequences?" Yes/No prompt before
   deleting anything.
