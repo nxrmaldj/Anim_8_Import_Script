@@ -1,46 +1,47 @@
 # script_2_sequence.py
-# Run AFTER script_1_import.py has finished for the same shot.
-# Run via: Unreal Editor > Python Script Runner
-# Or: UnrealEditor.exe MyProject.uproject -ExecutePythonScript="C:/Scripts/script_2_sequence.py"
+# Level Sequence Builder — run AFTER script_1_organize.py has routed assets
+# into shot folders.
+#
+# STATUS: not yet implemented. Build spec agreed and documented in
+# SCRIPT_2_PLAN.md — read that file for the full design.
+#
+# Planned run flow:
+#   1. Project selector  — list folders under /Game/Production/, user picks one
+#   2. Camera picker     — folder dialog for the Maya export folder on disk
+#                          (scanned for Shot##_Camera_anim.fbx files)
+#   3. Shot discovery    — every Shot## folder under the chosen project
+#   4. Per shot:
+#        - Create Level Sequence  Shot##_{ProjectName}  in Shot##/
+#        - SKIP the shot if a sequence with that name already exists
+#        - Add a Skeletal Mesh track per AnimSequence (skeleton looked up
+#          from the AnimSequence asset itself — no character dict)
+#        - Add a Geometry Cache track per GeometryCache asset
+#        - Spawn CineCamera named after the camera FBX (minus _anim)
+#        - Add Camera Cut track
+#        - Import camera FBX with match_by_name_only = False
+#        - No camera FBX found → build without camera track, log warning
+#   5. Log summary
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
-# Shared with script_1_import.py — keep both in sync.
 
-SOURCE_FOLDER = "C:/Exports/MyProject"
-PROJECT_ROOT  = "/Game/Production"
-ASSETS_ROOT   = "/Game/Assets"
-PROJECT_NAME  = "FindingKiiboh"  # ← change for each project
-
-KNOWN_CHARACTERS = {
-    "Kiiboh":               "/Game/Assets/Characters/Kiiboh/SK_Kiiboh",
-    "Kiiboh_Damaged":       "/Game/Assets/Characters/Kiiboh/SK_Kiiboh_Damaged",
-    "Kiiboh_Leg_Head_Tail": "/Game/Assets/Characters/Kiiboh/SK_Kiiboh_Leg_Head_Tail",
-    "Kiiboh_Part_All":      "/Game/Assets/Characters/Kiiboh/SK_Kiiboh_Part_All",
-    "Song":                 "/Game/Assets/Characters/Song/SK_Song",
-}
-
-ALEMBIC_SCALE = 1.0
-
-# ← Set this before each run
-SHOT_NUMBER = "Shot01"
+PROJECT_ROOT = "/Game/Production"
+ASSETS_ROOT  = "/Game/Assets"
 
 # ─── END CONFIG ──────────────────────────────────────────────────────────────
 
-# TODO: Script 2 — Level Sequence Builder (not yet implemented)
-# See UE_Import_Pipeline_Spec.docx for full spec.
-#
-# What this script will do:
-#   1. Read SHOT_NUMBER from config above
-#   2. Scan /Game/Production/{PROJECT_NAME}/{SHOT_NUMBER}/Animation/ for imported assets
-#   3. Find {SHOT_NUMBER}_Camera_anim.fbx in SOURCE_FOLDER — derive camera actor name
-#   4. Create Level Sequence at /Game/Production/{PROJECT_NAME}/{SHOT_NUMBER}/
-#   5. Spawn CineCamera Actor named to match the camera FBX
-#   6. Add Camera Cut track to the sequence
-#   7. Add Skeletal Mesh tracks for each animation asset (via KNOWN_CHARACTERS lookup)
-#   8. Add Geometry Cache tracks for each imported ABC asset
-#   9. Import the camera FBX directly into the sequence
-#  10. Log a summary of all tracks added + any warnings
-
 import unreal
 
-unreal.log("Script 2 — Level Sequence Builder: not yet implemented.")
+
+def run(project_name="", camera_folder="", dry_run=False):
+    """
+    Build Level Sequences for every shot in the chosen project.
+
+      project_name   blank → selection dialog listing /Game/Production/ folders
+      camera_folder  blank → folder picker for the Maya export folder
+      dry_run        True  → log the full build plan without creating anything
+    """
+    unreal.log("Script 2 — Level Sequence Builder: not yet implemented. See SCRIPT_2_PLAN.md")
+
+
+if __name__ == '__main__':
+    run()

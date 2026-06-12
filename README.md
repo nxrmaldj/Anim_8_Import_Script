@@ -6,6 +6,19 @@ Works with any Unreal Engine animation project — the project name is typed in 
 
 ---
 
+## Progress
+
+- [x] Script 1 — staging organizer (routes assets by real type, dry run, tested in production)
+- [x] Standalone test suite for routing logic (19 tests, no UE install needed)
+- [x] Editor Utility Widget — project name field, dry-run checkbox, Run button (dockable UI, built in-editor)
+- [x] Widget → Python wiring via Execute Python Command (auto-reloads script on every click)
+- [x] Script 2 design agreed — see [SCRIPT_2_PLAN.md](SCRIPT_2_PLAN.md)
+- [ ] Script 2 — Level Sequence Builder (next up)
+- [ ] Add Script 2 button/controls to the widget
+- [ ] Package widget into a content-only plugin for easy transfer between projects
+
+---
+
 ## Workflow
 
 1. The TA imports all FBX/ABC batches into `/Game/Staging` using Unreal's **native import window** (skeleton linking, LODs, etc. are handled there, the normal way)
