@@ -38,6 +38,8 @@ Complete reference for building and wiring the pipeline widget in Unreal Engine.
 
 See [PLUGIN_INSTALL.md](PLUGIN_INSTALL.md) for plugin install. Widget commands below use the **plugin** form (no `sys.path.append`).
 
+**After the widget works:** package it into the plugin so the team does not rebuild it — [WIDGET_PACKAGE.md](WIDGET_PACKAGE.md).
+
 ---
 
 ## Step 1 — Create the Widget Asset

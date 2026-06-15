@@ -4,11 +4,18 @@ Simplest way to run the pipeline in any Unreal project.
 
 ---
 
-## Install (3 steps)
+## Install (pick one)
 
-### 1. Copy the plugin folder
+### Option A — Installer script (easiest)
 
-Copy this entire repo into your Unreal project:
+1. Double-click **`install_plugin.bat`** (or run `python install_plugin.py`)
+2. Pick your **Unreal project folder** (where the `.uproject` file lives)  
+   — or pick the project's **`Plugins`** folder
+3. Continue with **Enable plugins** below
+
+### Option B — Manual copy
+
+Copy this repo into your Unreal project:
 
 ```
 YourProject/
@@ -24,9 +31,9 @@ YourProject/
                 └── init_unreal.py
 ```
 
-You can rename the repo folder from `Anim_8_Scripts` to `Anim8Pipeline` when copying.
+You can rename the repo folder from `Anim_8_Scripts` to `Anim8Pipeline` when copying manually.
 
-### 2. Enable plugins
+### Enable plugins in Unreal
 
 **Edit → Plugins**, search and enable:
 
@@ -38,15 +45,14 @@ You can rename the repo folder from `Anim_8_Scripts` to `Anim8Pipeline` when cop
 
 Restart the editor when prompted.
 
-### 3. Create folders + widget
+### Create folders + widget
 
 In Content Browser, create if missing:
 
 - `/Game/Staging`
 - `/Game/Production`
 
-Build the Editor Utility Widget using [WIDGET_GUIDE.md](WIDGET_GUIDE.md).  
-Use the **plugin** Python commands (no `sys.path.append`).
+**Widget:** build once using [WIDGET_GUIDE.md](WIDGET_GUIDE.md), then package it into the plugin using [WIDGET_PACKAGE.md](WIDGET_PACKAGE.md). After that, open it via **Tools → Anim8 Pipeline**.
 
 ---
 

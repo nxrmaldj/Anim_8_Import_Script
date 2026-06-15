@@ -6,11 +6,12 @@ Unreal Engine Python tools that organize Maya-exported assets into a clean produ
 
 ## Quick start (plugin)
 
-1. Copy this repo to `YourProject/Plugins/Anim8Pipeline/`
+1. Run **`install_plugin.bat`** → pick your Unreal project folder
 2. Enable **Python Editor Script Plugin** + **Anim8 Pipeline** in Edit → Plugins
 3. Restart the editor
 4. Build the widget — see [WIDGET_GUIDE.md](WIDGET_GUIDE.md)
-5. Full install steps — [PLUGIN_INSTALL.md](PLUGIN_INSTALL.md)
+
+Full steps — [PLUGIN_INSTALL.md](PLUGIN_INSTALL.md)
 
 ---
 
@@ -71,6 +72,7 @@ python test_sequence.py
 |---|---|
 | [PLUGIN_INSTALL.md](PLUGIN_INSTALL.md) | Copy plugin, enable, verify |
 | [WIDGET_GUIDE.md](WIDGET_GUIDE.md) | Build and wire the EUW |
+| [WIDGET_PACKAGE.md](WIDGET_PACKAGE.md) | Move EUW into plugin + run on any project |
 | [SCRIPT_2_PLAN.md](SCRIPT_2_PLAN.md) | Script 2 design spec |
 
 ---
