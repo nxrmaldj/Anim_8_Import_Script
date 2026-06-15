@@ -1,11 +1,7 @@
 # anim8_tools.py
 # Blueprint-callable helpers for the Editor Utility Widget.
 #
-# If nodes do not appear in the Graph search, copy this file + pipeline_common.py
-# into your project's Content/Python/ folder and restart the editor.
-#
-# Or run once per session in the Python console:
-#   import sys; sys.path.append("A:/Anim_8_Scripts"); import anim8_tools
+# Loaded automatically when the Anim8 Pipeline plugin is enabled (init_unreal.py).
 
 import unreal
 

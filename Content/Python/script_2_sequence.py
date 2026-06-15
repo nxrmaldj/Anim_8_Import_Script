@@ -2,8 +2,7 @@
 # Level Sequence Builder — run AFTER script_1_organize.py has routed assets
 # into shot folders. Full design: SCRIPT_2_PLAN.md
 #
-# From the Unreal Python console:
-#   import sys; sys.path.append("A:/Anim_8_Scripts")
+# From the Unreal Python console (plugin enabled):
 #   import script_2_sequence
 #   script_2_sequence.run(dry_run=True)                      # full plan, builds nothing
 #   script_2_sequence.run(shot_filter="Shot01", dry_run=False)  # build one shot only

@@ -6,7 +6,10 @@
 #   python test_sequence.py
 
 import sys
+import os
 import types
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "Content", "Python"))
 
 # ─── MOCK UNREAL ─────────────────────────────────────────────────────────────
 

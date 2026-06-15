@@ -1,0 +1,19 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0.0",
+	"FriendlyName": "Anim8 Pipeline",
+	"Description": "Organize assets from /Game/Staging and build Level Sequences per shot from Maya exports.",
+	"Category": "Editor",
+	"CreatedBy": "Anim-8",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"EnabledByDefault": true,
+	"Plugins": [
+		{
+			"Name": "PythonScriptPlugin",
+			"Enabled": true
+		}
+	]
+}
