@@ -23,6 +23,9 @@ REPO_ROOT = Path(__file__).resolve().parent
 UPLUGIN_FILE = REPO_ROOT / f"{PLUGIN_NAME}.uplugin"
 PYTHON_SOURCE_DIR = REPO_ROOT / "Content" / "Python"
 EDITOR_UTILITIES_DIR = REPO_ROOT / "Content" / "EditorUtilities"
+RESOURCES_DIR = REPO_ROOT / "Resources"
+CONFIG_DIR = REPO_ROOT / "Config"
+ICON_FILE = RESOURCES_DIR / "Icon128.png"
 
 
 def pick_folder(title: str) -> Path | None:
@@ -115,6 +118,23 @@ def copy_plugin(dest: Path) -> None:
                 copied_widget = True
         if copied_widget:
             print("  + Editor Utility Widget copied")
+
+    if ICON_FILE.is_file():
+        resources_dest = dest / "Resources"
+        resources_dest.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ICON_FILE, resources_dest / ICON_FILE.name)
+        print("  + Plugin icon copied")
+
+    if CONFIG_DIR.is_dir():
+        config_dest = dest / "Config"
+        config_dest.mkdir(parents=True, exist_ok=True)
+        copied_config = False
+        for src in CONFIG_DIR.iterdir():
+            if src.is_file() and src.suffix.lower() == ".ini":
+                shutil.copy2(src, config_dest / src.name)
+                copied_config = True
+        if copied_config:
+            print("  + Plugin config copied (Social Media filmback preset)")
 
 
 def main() -> int:

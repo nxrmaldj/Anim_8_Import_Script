@@ -10,6 +10,7 @@
 	"IsBetaVersion": false,
 	"IsExperimentalVersion": false,
 	"EnabledByDefault": true,
+	"Icon": "Resources/Icon128.png",
 	"Plugins": [
 		{
 			"Name": "PythonScriptPlugin",

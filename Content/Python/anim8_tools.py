@@ -11,6 +11,8 @@ from pipeline_common import (
     list_production_projects,
 )
 
+import script_3_render_queue
+
 
 @unreal.uclass()
 class Anim8PipelineTools(unreal.BlueprintFunctionLibrary):
@@ -34,3 +36,19 @@ class Anim8PipelineTools(unreal.BlueprintFunctionLibrary):
     def get_suggested_production_project():
         """Default project for the combo (matches open .uproject when possible)."""
         return get_suggested_production_project()
+
+    @unreal.ufunction(static=True, ret=int, category="Anim8 Pipeline", call_in_editor=True)
+    def add_project_shots_to_render_queue(project_name=""):
+        """
+        Clear Movie Render Queue and add all main shot sequences for the project.
+        Wire the widget Project combo to project_name. Open your render level first.
+        Returns the number of jobs added, or -1 on failure.
+        """
+        import importlib
+        importlib.reload(script_3_render_queue)
+        result = script_3_render_queue.run(
+            project_name=project_name,
+            dry_run=False,
+            interactive=False,
+        )
+        return result if result is not None else -1

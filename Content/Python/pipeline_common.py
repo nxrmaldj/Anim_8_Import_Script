@@ -130,6 +130,103 @@ def pick_folder(title="Select Maya Export Folder (camera FBX files)"):
     return ""
 
 
+def pick_production_project_dialog(projects, title="Select Production Project"):
+    """
+    Pick one folder name from /Game/Production/ when multiple exist.
+    Returns the chosen name, or '' on cancel.
+    """
+    projects = sorted(projects)
+    if not projects:
+        return ""
+    if len(projects) == 1:
+        return projects[0]
+
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+
+        result = {"project": ""}
+
+        root = tk.Tk()
+        root.title(title)
+        root.wm_attributes("-topmost", True)
+        root.geometry("360x320")
+        root.minsize(320, 260)
+
+        tk.Label(
+            root,
+            text="Multiple projects under /Game/Production/.\nSelect which one to use:",
+            justify=tk.LEFT,
+        ).pack(pady=(10, 6), padx=12, anchor="w")
+
+        listbox = tk.Listbox(root, height=min(len(projects), 12), exportselection=False)
+        listbox.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 8))
+        for name in projects:
+            listbox.insert(tk.END, name)
+        listbox.selection_set(0)
+        listbox.activate(0)
+
+        def confirm():
+            selection = listbox.curselection()
+            if not selection:
+                messagebox.showwarning(
+                    title="No selection",
+                    message="Select a production project.",
+                    parent=root,
+                )
+                return
+            result["project"] = projects[selection[0]]
+            root.destroy()
+
+        def cancel():
+            result["project"] = ""
+            root.destroy()
+
+        btn_row = tk.Frame(root)
+        btn_row.pack(pady=(0, 10))
+        tk.Button(btn_row, text="Use Selected", command=confirm, width=14).pack(side=tk.LEFT, padx=4)
+        tk.Button(btn_row, text="Cancel", command=cancel, width=10).pack(side=tk.LEFT, padx=4)
+
+        listbox.bind("<Double-Button-1>", lambda _e: confirm())
+        root.protocol("WM_DELETE_WINDOW", cancel)
+        root.mainloop()
+        return result["project"]
+    except Exception:
+        pass
+
+    return ""
+
+
+def resolve_production_project_choice(explicit="", production_folders=None, interactive=False):
+    """
+    Resolve which /Game/Production/ project to use.
+
+      explicit              widget value or run() argument (preferred)
+      production_folders    folder names from list_production_projects()
+      interactive           when True and explicit is blank with multiple projects,
+                            open a picker dialog instead of guessing
+    """
+    folders = production_folders if production_folders is not None else list_production_projects()
+    if not folders:
+        return ""
+
+    explicit = normalize_project_name(explicit)
+    if explicit:
+        matched = match_production_folder(explicit, folders)
+        return matched or (explicit if explicit in folders else explicit)
+
+    if len(folders) == 1:
+        return folders[0]
+
+    if interactive:
+        picked = pick_production_project_dialog(folders)
+        if picked:
+            unreal.log(f"Selected production project: {picked}")
+        return picked
+
+    return resolve_production_project("", folders)
+
+
 import sys
 import types
 

@@ -116,6 +116,65 @@ print("\n── sequence_name_for ───────────────�
 check("Shot01 + MyProject → Shot01_MyProject",
       s2.sequence_name_for("Shot01", "MyProject"), "Shot01_MyProject")
 
+check("MyProject → MyProject_Master",
+      s2.master_sequence_name_for("MyProject"), "MyProject_Master")
+
+check("Shot01 + MyProject → Shot01_MyProject_Lighting",
+      s2.lighting_sequence_name_for("Shot01", "MyProject"), "Shot01_MyProject_Lighting")
+
+# ─── main shot sequence discovery ────────────────────────────────────────────
+
+print("\n── main shot sequence discovery ─────────────────────────────────────────")
+
+check("Shot32_Lighting is lighting",
+      s2.is_lighting_sequence_name("Shot32_CoffeeMonster_Fight_Lighting"), True)
+
+check("Shot32 is not lighting",
+      s2.is_lighting_sequence_name("Shot32"), False)
+
+check("prefers Shot32_Project over legacy Shot32",
+      s2.pick_main_shot_sequence_name(
+          ["Shot32", "Shot32_CoffeeMonster_Fight", "Shot32_CoffeeMonster_Fight_Lighting"],
+          "Shot32", "CoffeeMonster_Fight"),
+      "Shot32_CoffeeMonster_Fight")
+
+check("legacy Shot32 when no project suffix exists",
+      s2.pick_main_shot_sequence_name(
+          ["Shot32", "Shot32_Lighting"],
+          "Shot32", "CoffeeMonster_Fight"),
+      "Shot32")
+
+check("ignores lighting only",
+      s2.pick_main_shot_sequence_name(["Shot32_Lighting"], "Shot32", "CoffeeMonster_Fight"),
+      None)
+
+# ─── sort_shot_names ─────────────────────────────────────────────────────────
+
+print("\n── sort_shot_names ──────────────────────────────────────────────────────")
+
+check("natural shot order",
+      s2.sort_shot_names(["Shot11A", "Shot02", "Shot10", "Shot01", "Shot11"]),
+      ["Shot01", "Shot02", "Shot10", "Shot11", "Shot11A"])
+
+# ─── frame timing ────────────────────────────────────────────────────────────
+
+print("\n── frame timing ─────────────────────────────────────────────────────────")
+
+check("120f content + preroll → 121 total",
+      s2.compute_total_shot_frames(120, has_anim_or_cache=True), 121)
+
+check("120f content, no anim → 120 total",
+      s2.compute_total_shot_frames(120, has_anim_or_cache=False), 120)
+
+check("0f content → minimum 1",
+      s2.compute_total_shot_frames(0, has_anim_or_cache=False), 1)
+
+check("camera always starts frame 0",
+      s2.camera_start_frame(has_anim_or_cache=True, content_frames=120), 0)
+
+check("camera starts frame 0 when camera-only",
+      s2.camera_start_frame(has_anim_or_cache=False, content_frames=120), 0)
+
 resolve = s2.resolve_shots
 
 # ─── resolve_shots ───────────────────────────────────────────────────────────

@@ -9,13 +9,16 @@ Complete reference for building and wiring the pipeline widget in Unreal Engine.
 | Section | Script | Purpose |
 |---|---|---|
 | **Organize Staging** | `script_1_organize.py` | Moves assets from `/Game/Staging` into production folders |
-| **Build Sequences** | `script_2_sequence.py` | Builds Level Sequences per shot (anims, geo caches, cameras) |
+| **Build Sequences** | `script_2_sequence.py` | Builds shot sequences (preroll + lighting subsequence) and master |
+| **Add to Render Queue** | `script_3_render_queue.py` | Clears MRQ and adds all main shot sequences |
+
+**MRQ button not working?** → [MRQ_BUTTON.md](MRQ_BUTTON.md) (fix wiring in `EUW_Anim8Pipeline5_5`)
 
 **Typical workflow:**
 1. TA imports FBX/ABC into `/Game/Staging` using Unreal's normal import window
 2. Run **Organize Staging** → assets move to `/Game/Production/{Project}/Shot##/Animation/`
 3. Click **Find Camera Folder** → pick the Maya export folder on disk
-4. Run **Build Sequences** → Level Sequences are created per shot
+4. Run **Build Sequences** → shot Level Sequences with preroll anims, lighting subsequence, and optional `{Project}_Master`
 
 ---
 
@@ -71,6 +74,10 @@ Build this layout in the **Designer** tab. Use Text blocks for section headers i
 │  [ ] Overwrite Existing                       │
 │  [       Build Sequences        ]             │
 │                                               │
+│  ── 3 · Render Queue ──────────────────────   │
+│  Project  [ TestRun ▼ ]                       │
+│  [     Add Shots to Render Queue    ]         │
+│                                               │
 └───────────────────────────────────────────────┘
 ```
 
@@ -100,6 +107,13 @@ For **every** control below: select it in Designer → Details panel → tick **
 | Check Box | `SequenceDryRunCheckbox` | unchecked |
 | Check Box | `OverwriteCheckbox` | **unchecked** |
 | Button | `SequenceRunButton` | label: "Build Sequences" |
+
+### Section 3 — Render Queue
+
+| Widget | Variable name | Default |
+|---|---|---|
+| Combo Box (String) | `RenderQueueProjectCombo` | same project list as Section 2 (or reuse `SequenceProjectCombo`) |
+| Button | `RenderQueueButton` | label: "Add Shots to Render Queue" |
 
 **Removed from Section 2:** Project Name text box and Camera Folder text box — project is a **dropdown in the widget**, camera path is set by **Find Camera Folder** (stored in memory, no popup on Run).
 
@@ -486,8 +500,8 @@ SomeCheckbox → Is Checked → Select String (Pick A)
 | AllShotsCheckbox | **`False`** | **`True`** | `{pick}` — **opposite** of the others |
 
 **All Shots logic (no NOT node needed):**
-- Checked → `False` → build **all** shots
-- Unchecked → `True` → opens **shot checkbox dialog** on Run
+- Checked → `False` → build **all** shots (no picker)
+- Unchecked → `True` → opens **shot checkbox dialog** on Run — pick shots, lighting, and **master sequence**
 
 Do **not** use "Invert Select Mesh" — that is unrelated.
 
@@ -611,6 +625,40 @@ import pipeline_common, script_2_sequence, importlib; importlib.reload(pipeline_
 
 ---
 
+### Button 4 — RenderQueueButton (recommended: Anim8 Blueprint node)
+
+**Easiest wiring — no Format Text:**
+
+1. Graph → search **`Add Project Shots To Render Queue`** (category **Anim8 Pipeline**)
+2. If missing: Python console once → `import anim8_tools` → restart editor
+3. Wire:
+
+```
+On Clicked (RenderQueueButton) ──exec──► Add Project Shots To Render Queue
+                                              ▲
+SequenceProjectCombo → Get Selected Option ───┘  (Project Name pin)
+```
+
+If **Get Selected Option** is empty, use **Get Option String At Index** with **Get Selected Index** instead.
+
+---
+
+**Alternate — Execute Python Command**
+
+Format Text:
+
+```
+import pipeline_common, script_3_render_queue, importlib; importlib.reload(pipeline_common); importlib.reload(script_3_render_queue); script_3_render_queue.run(project_name="{project}", interactive=False)
+```
+
+| `{project}` | `SequenceProjectCombo` → **Get Selected Option** |
+
+**Before clicking:** open the **level you render from** in the editor. MRQ needs a map — jobs will not appear if no level is open.
+
+**What it does:** Clears MRQ, adds every main shot LS for the selected project (legacy `Shot##` names included). Opens the MRQ window when done. Check **Output Log** for `MRQ queue reports N job(s)`.
+
+---
+
 ## Step 7 — Compile, Save, Run
 
 1. **Compile** the widget (Compile button top-left)
@@ -633,11 +681,30 @@ import pipeline_common, script_2_sequence, importlib; importlib.reload(pipeline_
 1. **Project** dropdown lists folders under `/Game/Production/` (filled on widget open)
 2. Click **Find Camera Folder** → select Maya export folder (`Shot##_cam.fbx` files)
 3. Confirm path in Output Log: `Camera export folder set: ...`
-4. **All Shots** checked = build everything; unchecked = checkbox dialog to pick shots
+4. **All Shots** checked = build everything; unchecked = checkbox dialog (scroll with mouse wheel) to pick shots, lighting, and master
 5. Set **FPS** (24 / 30 / 60)
 6. Check **Dry Run** → click **Build Sequences** → review log + health check
 7. Uncheck Dry Run → run for real
 8. **Overwrite Existing** — only when rebuilding; Python asks "Are you sure?" before deleting sequences
+
+### Per-shot timeline (Build Sequences)
+
+Each main shot sequence is built with:
+
+| Track | Frames |
+|---|---|
+| Skeletal anims / Alembic | Frame **0** = 1-frame hold (first pose); frame **1+** = full clip |
+| Camera | Starts frame **0** (full shot length) |
+| Lighting subsequence (`MovieSceneSubTrack`) | **0 → total** (matches full shot length, e.g. 121) |
+| Lighting LS asset playback | Same **0 → total** as the parent shot |
+
+Master sequence assembly is **unchanged** — rebuild master separately if needed.
+
+### Add to Render Queue
+1. Select **Project** (same dropdown as Build Sequences, or a dedicated combo)
+2. Click **Add Shots to Render Queue**
+3. Open **Window → Cinematics → Movie Render Queue** — all main shots are listed
+4. Set output/preset in MRQ manually, then render
 
 ---
 
@@ -651,8 +718,12 @@ import pipeline_common, script_2_sequence, importlib; importlib.reload(pipeline_
 **Script 2 summary (end of run):**
 ```
 Done — Built: 38  Skipped: 4  Errors: 0
-Cameras missing : 2  (Shot07, Shot19)
-Empty folders   : 0
+
+  Master sequence — MyProject_Master
+    [DRY RUN] Would create master: /Game/Production/MyProject/MyProject_Master
+    [DRY RUN]   + shot Shot01: frames 0–120 (Shot01_MyProject) (estimated duration)
+    [DRY RUN]   + shot Shot02: frames 120–240 (Shot02_MyProject) (estimated duration)
+    [DRY RUN]   total playback: 0–240 frames (2 shots)
 ```
 
 **Harmless warning (camera still imports):**
@@ -680,6 +751,49 @@ Unreal tries a name match first, then imports onto the spawnable anyway. Safe to
 | `cannot import name 'list_production_projects' from 'pipeline_common'` | Stale Python cache — update Build Sequences Format Text to reload `pipeline_common` first (see Step 6), or restart the editor |
 | Script changes not applying | `importlib.reload` in Format Text handles this — recompile widget if you changed the command string |
 | Checkbox values wrong | Select String must use `True`/`False` with capital T and F |
+| Widget won't open / compile errors in UE 5.4 (built in 5.7) | **UE assets are not backward-compatible.** Rebuild the widget in your target engine — see [UE version compatibility](#ue-version-compatibility-54-vs-57) below |
+
+---
+
+## UE version compatibility (5.4 vs 5.7)
+
+**Yes — building the widget in UE 5.7 is very likely why it fails in 5.4.**
+
+Unreal `.uasset` files (including Editor Utility Widgets) are saved for a specific engine version. A widget created in **5.7 cannot be opened or run in 5.4** — you will see load errors, missing pins, or a blank/broken widget.
+
+### What still works in 5.4 without rebuilding the widget
+
+The **Python scripts** (`script_1_organize.py`, `script_2_sequence.py`) are designed for UE 5.4+ and can be run from the **Python console** even when the packaged widget fails:
+
+```python
+import script_1_organize, script_2_sequence
+script_1_organize.run(dry_run=True)
+script_2_sequence.run(dry_run=True)   # builds shots + lighting + master
+```
+
+Install the plugin with `install_plugin.bat`, enable **Python Editor Script Plugin**, restart the editor.
+
+### Fix: rebuild the widget in UE 5.4
+
+1. Open your **5.4** project with the plugin installed
+2. Follow **Steps 1–7** in this guide to create `EUW_Anim8Pipeline` **inside 5.4**
+3. Package it to `/Anim8Pipeline/EditorUtilities/EUW_Anim8Pipeline` — see [WIDGET_PACKAGE.md](WIDGET_PACKAGE.md)
+4. Copy the new `.uasset` into this repo's `Content/EditorUtilities/` so the team gets a 5.4-compatible widget
+
+### Team on mixed UE versions
+
+| Engine | Widget |
+|---|---|
+| UE 5.4 | Build and save widget in 5.4 |
+| UE 5.7 | Build and save widget in 5.7 |
+
+Keep separate widget `.uasset` files per engine generation, or standardize the studio on one UE version.
+
+### Required plugins (all supported versions)
+
+- **Python Editor Script Plugin**
+- **Editor Scripting Utilities** (for List Assets on the Project dropdown)
+- **Anim8 Pipeline** (this plugin)
 
 ---
 
@@ -719,5 +833,7 @@ script_2_sequence.run(
     fps=24,
     overwrite=False,
     interactive_shots=False,
+    build_lighting=True,
+    build_master=True,
 )
 ```
