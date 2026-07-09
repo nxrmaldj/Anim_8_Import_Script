@@ -70,7 +70,7 @@ Restart the editor when prompted.
 
 ### Social Media filmback preset
 
-The installer copies `Config/DefaultEngine.ini`, which adds a **Cine Camera** filmback preset:
+The installer copies `Config/DefaultEngine.ini` **and** patches your project's `Config/DefaultEngine.ini` directly (plugin config merge alone is unreliable for project plugins):
 
 | Setting | Value |
 |---|---|

@@ -27,6 +27,24 @@ RESOURCES_DIR = REPO_ROOT / "Resources"
 CONFIG_DIR = REPO_ROOT / "Config"
 ICON_FILE = RESOURCES_DIR / "Icon128.png"
 
+CINE_CAMERA_SECTION = "[/Script/CinematicCamera.CineCameraSettings]"
+SOCIAL_MEDIA_MARKER = 'Name="Social Media"'
+TOOLBAR_STARTUP_SECTION = "[/Script/Blutility.EditorUtilitySubsystem]"
+TOOLBAR_STARTUP_ENTRIES = (
+    "+StartupObjects=/Anim8Pipeline/EditorUtilities/EUB_ToolBar.EUB_ToolBar",
+    "+StartupObjects=/Anim8Pipeline/EditorUtilities/EUB_ToolBar_Button.EUB_ToolBar_Button",
+)
+FILMBACK_PRESET_LINE = (
+    '+FilmbackPresets=(Name="Social Media",'
+    'DisplayName=NSLOCTEXT("", "SocialMediaFilmback", "Social Media"),'
+    "FilmbackSettings=(SensorWidth=13.365000,SensorHeight=23.760000,"
+    "SensorHorizontalOffset=0.000000,SensorVerticalOffset=0.000000,"
+    "SensorAspectRatio=0.562500))"
+)
+BLANK_DISPLAY_SOCIAL_MEDIA = (
+    '+FilmbackPresets=(Name="Social Media",DisplayName="",FilmbackSettings='
+)
+
 
 def pick_folder(title: str) -> Path | None:
     """Native folder picker. Returns None if cancelled."""
@@ -111,13 +129,16 @@ def copy_plugin(dest: Path) -> None:
     if EDITOR_UTILITIES_DIR.is_dir():
         util_dest = dest / "Content" / "EditorUtilities"
         util_dest.mkdir(parents=True, exist_ok=True)
-        copied_widget = False
-        for src in EDITOR_UTILITIES_DIR.iterdir():
-            if src.suffix.lower() == ".uasset":
-                shutil.copy2(src, util_dest / src.name)
-                copied_widget = True
-        if copied_widget:
-            print("  + Editor Utility Widget copied")
+        util_assets = sorted(EDITOR_UTILITIES_DIR.glob("*.uasset"))
+        if not util_assets:
+            raise FileNotFoundError(
+                f"No Editor Utility assets in {EDITOR_UTILITIES_DIR}\n"
+                "Expected EUW_Anim8Pipeline.uasset, EUB_ToolBar.uasset, "
+                "and EUB_ToolBar_Button.uasset."
+            )
+        for src in util_assets:
+            shutil.copy2(src, util_dest / src.name)
+            print(f"  + Editor utility asset: {src.name}")
 
     if ICON_FILE.is_file():
         resources_dest = dest / "Resources"
@@ -135,6 +156,98 @@ def copy_plugin(dest: Path) -> None:
                 copied_config = True
         if copied_config:
             print("  + Plugin config copied (Social Media filmback preset)")
+
+
+def apply_social_media_filmback_to_project(project_root: Path) -> bool:
+    """
+    Add Social Media filmback to the project's DefaultEngine.ini.
+
+    Plugin Config/*.ini merge is unreliable for project plugins, so we patch
+    the project config directly on install.
+
+    Returns True if the file was changed.
+    """
+    config_dir = project_root / "Config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    ini_path = config_dir / "DefaultEngine.ini"
+
+    existing = ini_path.read_text(encoding="utf-8") if ini_path.is_file() else ""
+
+    if SOCIAL_MEDIA_MARKER in existing:
+        if BLANK_DISPLAY_SOCIAL_MEDIA in existing:
+            upgraded = existing.replace(
+                BLANK_DISPLAY_SOCIAL_MEDIA,
+                '+FilmbackPresets=(Name="Social Media",'
+                'DisplayName=NSLOCTEXT("", "SocialMediaFilmback", "Social Media"),'
+                "FilmbackSettings=",
+                1,
+            )
+            ini_path.write_text(upgraded, encoding="utf-8")
+            return True
+        return False
+
+    if CINE_CAMERA_SECTION in existing:
+        lines = existing.splitlines(keepends=True)
+        new_lines: list[str] = []
+        inserted = False
+        for line in lines:
+            new_lines.append(line)
+            if not inserted and line.strip() == CINE_CAMERA_SECTION:
+                suffix = "" if line.endswith("\n") else "\n"
+                new_lines.append(FILMBACK_PRESET_LINE + suffix)
+                inserted = True
+        if not inserted:
+            new_lines.append("\n" + CINE_CAMERA_SECTION + "\n" + FILMBACK_PRESET_LINE + "\n")
+        ini_path.write_text("".join(new_lines), encoding="utf-8")
+    else:
+        block = (
+            "\n; Anim8 Pipeline — Social Media Cine Camera filmback preset\n"
+            f"{CINE_CAMERA_SECTION}\n"
+            f"{FILMBACK_PRESET_LINE}\n"
+        )
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        ini_path.write_text(existing + block, encoding="utf-8")
+
+    return True
+
+
+def _toolbar_startup_entry_present(existing: str, entry: str) -> bool:
+    stripped = entry.lstrip("+")
+    return entry in existing or stripped in existing
+
+
+def apply_toolbar_startup_to_project(project_root: Path) -> bool:
+    """
+    Register EUB_ToolBar and EUB_ToolBar_Button as Blutility startup objects.
+    UE 5.5 has no reliable Class Defaults toggle for plugin EUOs — ini is the supported approach.
+
+    Returns True if the file was changed.
+    """
+    config_dir = project_root / "Config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    ini_path = config_dir / "DefaultEditorPerProjectUserSettings.ini"
+
+    existing = ini_path.read_text(encoding="utf-8") if ini_path.is_file() else ""
+    missing = [
+        entry
+        for entry in TOOLBAR_STARTUP_ENTRIES
+        if not _toolbar_startup_entry_present(existing, entry)
+    ]
+    if not missing:
+        return False
+
+    block = (
+        "\n; Anim8 Pipeline — toolbar on editor startup "
+        "(EUB_ToolBar + EUB_ToolBar_Button)\n"
+        f"{TOOLBAR_STARTUP_SECTION}\n"
+        + "\n".join(missing)
+        + "\n"
+    )
+    if existing and not existing.endswith("\n"):
+        existing += "\n"
+    ini_path.write_text(existing + block, encoding="utf-8")
+    return True
 
 
 def main() -> int:
@@ -167,13 +280,29 @@ def main() -> int:
             print("Cancelled — existing install left unchanged.")
             return 1
 
+    project_root = dest.parent.parent if dest.parent.name == "Plugins" else dest.parent
+
     try:
         copy_plugin(dest)
+        changed = apply_social_media_filmback_to_project(project_root)
+        if changed:
+            print("  + Social Media filmback written to project Config/DefaultEngine.ini")
+        else:
+            print("  = Social Media filmback already in project DefaultEngine.ini")
+        toolbar_changed = apply_toolbar_startup_to_project(project_root)
+        if toolbar_changed:
+            print(
+                "  + Toolbar startup written to project "
+                "Config/DefaultEditorPerProjectUserSettings.ini"
+            )
+        else:
+            print(
+                "  = Toolbar startup already in project "
+                "Config/DefaultEditorPerProjectUserSettings.ini"
+            )
     except (FileNotFoundError, OSError) as exc:
         print(f"Install failed: {exc}")
         return 1
-
-    project_root = dest.parent.parent if dest.parent.name == "Plugins" else dest.parent
 
     print()
     print("Done — plugin installed.")
@@ -181,8 +310,8 @@ def main() -> int:
     print("Next steps:")
     print("  1. Open the project in Unreal Editor")
     print("  2. Edit → Plugins → enable Python Editor Script Plugin + Anim8 Pipeline")
-    print("  3. Enable Editor Scripting Utilities (for the widget Refresh / List Assets)")
-    print("  4. Restart the editor")
+    print("  3. Enable Editor Scripting Utilities (Edit → Plugins)")
+    print("  4. Restart the editor — toolbar assets run on startup")
     print()
     if find_uproject(project_root):
         print(f"  Project: {find_uproject(project_root).name}")

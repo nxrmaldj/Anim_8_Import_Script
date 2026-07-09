@@ -145,7 +145,7 @@ Derived from the asset name — shot prefix and suffixes are stripped:
 | Master sequence | `{ProjectName}_Master` | `CoffeeMonster_Fight_Master` |
 | Master location | `/Game/Production/{Project}/` | Project root (not inside a shot folder) |
 | Master structure | One **Shot Track** with each shot LS as a section | Same as UE “Add Master Sequence” |
-| Camera actor in sequence | From camera FBX name | `Shot01_cam` or `Shot01_Camera` |
+| Camera actor in sequence | `Shot##_cam` | `Shot01_cam` |
 
 One Level Sequence per shot folder. The **master** sequence stitches every shot sequence together in shot order (`Shot01`, `Shot02`, `Shot11A`, …). Empty **lighting** sequences are created per shot for the lighting team.
 

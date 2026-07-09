@@ -1,8 +1,8 @@
-Packaged Editor Utility Widgets (copy of what ships with install_plugin).
+Packaged Editor Utility assets (ships with install_plugin).
 
-  EUW_Anim8Pipeline5_5.uasset  — UE 5.5 widget (SongBedroom build)
-  EUW_Anim8Pipeline.uasset       — UE 5.7 / legacy
+  EUW_Anim8Pipeline.uasset     — main pipeline widget (Organize / Build / MRQ)
+  EUB_ToolBar.uasset           — runs on startup (registers toolbar button)
+  EUB_ToolBar_Button.uasset    — runs on startup (toolbar button asset)
 
-MRQ button broken? See MRQ_BUTTON.md in the plugin repo root.
-
-anim8_launcher.py opens EUW_Anim8Pipeline5_5 first, then legacy name, then any EUW_*.
+Open widget: Tools → Anim8 Pipeline
+Toolbar: install_plugin writes both assets to project DefaultEditorPerProjectUserSettings.ini

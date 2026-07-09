@@ -44,17 +44,11 @@ Find your existing widget (e.g. `/Game/EUW_Anim8Pipeline`).
 
 - Right-click the widget → **Asset Actions → Move To** → pick `EditorUtilities` under the plugin
 
-### 5. Rename (recommended)
+### 5. Canonical name
 
-Use a name that matches your **Unreal engine version** when the team runs mixed versions:
+Use **`EUW_Anim8Pipeline`** (no version suffix). One widget per engine generation — rebuild in UE 5.7 if you upgrade engines.
 
-| Engine | Suggested asset name |
-|---|---|
-| UE 5.5 | `EUW_Anim8Pipeline5_5` |
-| UE 5.7 | `EUW_Anim8Pipeline` |
-
-`anim8_launcher.py` tries known names first, then any `EUW_*` under `EditorUtilities/`.  
-You do **not** need the same filename as an older engine build — keep separate `.uasset` files per UE generation.
+`anim8_launcher.py` opens `/Anim8Pipeline/EditorUtilities/EUW_Anim8Pipeline`, or any `EUW_*` fallback under `EditorUtilities/`.
 
 ### 6. Update Python commands (plugin form)
 
@@ -82,7 +76,7 @@ import pipeline_common, script_2_sequence, importlib; importlib.reload(pipeline_
 Copy the `.uasset` (and any `.umap` if you created one — you shouldn’t need one) into the git repo:
 
 ```
-Anim_8_Scripts/Content/EditorUtilities/EUW_Anim8Pipeline5_5.uasset
+Anim_8_Scripts/Content/EditorUtilities/EUW_Anim8Pipeline.uasset
 ```
 
 Then `install_plugin.bat` will copy it to other projects automatically.

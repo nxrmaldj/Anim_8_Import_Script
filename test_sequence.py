@@ -51,14 +51,17 @@ check("Shot → False",         s2.is_shot_folder("Shot"), False)
 
 print("\n── camera_name_for ──────────────────────────────────────────────────────")
 
-check("Shot01_Camera_anim.fbx → Shot01_Camera",
-      s2.camera_name_for("Shot01_Camera_anim.fbx"), "Shot01_Camera")
+check("Shot01_Camera_anim.fbx → Shot01_cam",
+      s2.camera_name_for("Shot01_Camera_anim.fbx"), "Shot01_cam")
 
-check("Shot11A_Camera_ANIM.fbx → Shot11A_Camera (case)",
-      s2.camera_name_for("Shot11A_Camera_ANIM.fbx"), "Shot11A_Camera")
+check("Shot11A_Camera_ANIM.fbx → Shot11A_cam (case)",
+      s2.camera_name_for("Shot11A_Camera_ANIM.fbx"), "Shot11A_cam")
 
 check("Shot01_cam.fbx → Shot01_cam",
       s2.camera_name_for("Shot01_cam.fbx"), "Shot01_cam")
+
+check("shot arg overrides filename → Shot03_cam",
+      s2.camera_name_for("Shot03_Camera_anim.fbx", shot="Shot03"), "Shot03_cam")
 
 # ─── find_camera_fbx ─────────────────────────────────────────────────────────
 
@@ -169,11 +172,20 @@ check("120f content, no anim → 120 total",
 check("0f content → minimum 1",
       s2.compute_total_shot_frames(0, has_anim_or_cache=False), 1)
 
-check("camera always starts frame 0",
-      s2.camera_start_frame(has_anim_or_cache=True, content_frames=120), 0)
+check("camera cut always starts frame 0",
+      s2.camera_cut_start_frame(), 0)
 
-check("camera starts frame 0 when camera-only",
-      s2.camera_start_frame(has_anim_or_cache=False, content_frames=120), 0)
+check("camera binding sections start frame 1 when shot has anims/caches",
+      s2.camera_transform_start_frame(has_anim_or_cache=True, content_frames=120), 1)
+
+check("camera binding sections start frame 0 when camera-only",
+      s2.camera_transform_start_frame(has_anim_or_cache=False, content_frames=120), 0)
+
+check("Social Media filmback size",
+      s2.social_media_filmback_settings(), (13.365, 23.76))
+
+check("Social Media filmback preset name",
+      s2.SOCIAL_MEDIA_FILMBACK_PRESET, "Social Media")
 
 resolve = s2.resolve_shots
 

@@ -7,6 +7,10 @@
 #   script_2_sequence.run(dry_run=True)                      # full plan, builds nothing
 #   script_2_sequence.run(shot_filter="Shot01", dry_run=False)  # build one shot only
 #   script_2_sequence.run(dry_run=False)                     # build everything
+#
+# Social Media filmback on existing sequences (any production folder under /Game/Production/):
+#   script_2_sequence.apply_social_media_filmback_to_all_projects()
+#   script_2_sequence.apply_social_media_filmback_to_project("MyProject")  # one project only
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
 
@@ -18,6 +22,12 @@ SEQUENCE_FPS = 24
 
 # Extra frame at the start of each shot so lighting can load before render.
 PREROLL_FRAMES = 1
+
+# Cine Camera filmback applied to every shot camera (matches Config/DefaultEngine.ini preset).
+APPLY_SOCIAL_MEDIA_FILMBACK = True
+SOCIAL_MEDIA_FILMBACK_PRESET = "Social Media"
+SOCIAL_MEDIA_SENSOR_WIDTH_MM = 13.365
+SOCIAL_MEDIA_SENSOR_HEIGHT_MM = 23.76
 
 # ─── END CONFIG ──────────────────────────────────────────────────────────────
 
@@ -50,10 +60,17 @@ def is_shot_folder(name):
     return bool(_SHOT_RE.match(name))
 
 
-def camera_name_for(camera_fbx_filename):
-    """'Shot01_Camera_anim.fbx' → 'Shot01_Camera' (the CineCamera actor name)."""
-    base = os.path.splitext(camera_fbx_filename)[0]
-    return re.sub(r'_anim$', '', base, flags=re.IGNORECASE)
+def camera_name_for(camera_fbx_filename, shot=None):
+    """Always return Shot##_cam for the CineCamera actor / Sequencer binding."""
+    if shot:
+        return f"{shot}_cam"
+
+    base = os.path.splitext(camera_fbx_filename or "")[0]
+    match = re.match(r'^(Shot\d+[A-Za-z]?)', base, re.IGNORECASE)
+    if match:
+        return f"{match.group(1)}_cam"
+
+    return re.sub(r'_anim$', '', base, flags=re.IGNORECASE) or "Camera"
 
 
 def find_camera_fbx(shot, camera_files):
@@ -148,9 +165,282 @@ def compute_total_shot_frames(content_frames, has_anim_or_cache=False):
     return max(content, 1)
 
 
-def camera_start_frame(has_anim_or_cache=False, content_frames=0):
-    """Camera Cut track always starts at frame 0."""
+def camera_cut_start_frame():
+    """Camera Cut track always starts at frame 0 so MRQ render begins at frame 0."""
     return 0
+
+
+def camera_transform_start_frame(has_anim_or_cache=False, content_frames=0):
+    """
+    Camera spawnable section start frame (root binding shift).
+    Frame 0 is anim preroll — camera sections start at frame 1 to line up with animation.
+    """
+    if has_anim_or_cache and content_frames > 0:
+        return PREROLL_FRAMES
+    return 0
+
+
+def camera_start_frame(has_anim_or_cache=False, content_frames=0):
+    """Alias for camera_transform_start_frame (back-compat)."""
+    return camera_transform_start_frame(has_anim_or_cache, content_frames)
+
+
+def set_binding_actor_label(binding, label):
+    """Set the spawnable template actor label (shown at top of Details)."""
+    template = get_spawnable_template(binding)
+    if template is None:
+        return False
+
+    if set_actor_label(template, label):
+        return True
+
+    for prop in ("ActorLabel", "actor_label"):
+        try:
+            template.set_editor_property(prop, label)
+            return True
+        except Exception:
+            continue
+
+    return False
+
+
+def set_actor_label(actor, label):
+    """Set an actor label when the engine API allows it."""
+    if actor is None:
+        return False
+
+    label_setter = getattr(actor, "set_actor_label", None)
+    if label_setter is None:
+        return False
+
+    try:
+        label_setter(label, True)
+        return True
+    except TypeError:
+        try:
+            label_setter(label)
+            return True
+        except Exception:
+            return False
+    except Exception:
+        return False
+
+
+def apply_camera_binding_names(binding, camera_name):
+    """Apply Sequencer outliner + Details actor label for a camera spawnable."""
+    if binding is None or not camera_name:
+        return
+
+    ext = getattr(unreal, "MovieSceneBindingExtensions", None)
+    if ext is not None:
+        try:
+            ext.set_display_name(binding, _to_display_text(camera_name))
+        except Exception:
+            try:
+                ext.set_display_name(binding, camera_name)
+            except Exception:
+                pass
+        try:
+            ext.set_name(binding, camera_name)
+        except Exception:
+            pass
+
+    try:
+        binding.set_display_name(camera_name)
+    except Exception:
+        pass
+
+    set_binding_actor_label(binding, camera_name)
+
+
+def social_media_filmback_settings():
+    """Return CameraFilmbackSettings for the Social Media preset (testable sizes)."""
+    return (
+        SOCIAL_MEDIA_SENSOR_WIDTH_MM,
+        SOCIAL_MEDIA_SENSOR_HEIGHT_MM,
+    )
+
+
+def _to_display_text(name):
+    """Convert a string to unreal.Text for Sequencer binding display names."""
+    try:
+        return unreal.Text.from_string(name)
+    except Exception:
+        try:
+            return unreal.Text(name)
+        except Exception:
+            return name
+
+
+def get_spawnable_template(binding):
+    """Return the spawnable template object for a sequencer binding, if any."""
+    if binding is None:
+        return None
+
+    ext = getattr(unreal, "MovieSceneBindingExtensions", None)
+    if ext is not None and hasattr(ext, "get_object_template"):
+        try:
+            template = ext.get_object_template(binding)
+            if template is not None:
+                return template
+        except Exception:
+            pass
+
+    for attr in ("get_object_template", "object_template"):
+        member = getattr(binding, attr, None)
+        if member is None:
+            continue
+        try:
+            return member() if callable(member) else member
+        except Exception:
+            continue
+
+    return None
+
+
+def get_cine_camera_component_from_binding(binding):
+    """
+    Resolve a CineCameraComponent from a spawnable or possessable binding.
+    Spawnables must be edited through their template object.
+    """
+    template = get_spawnable_template(binding)
+    if template is not None:
+        getter = getattr(template, "get_cine_camera_component", None)
+        if getter is not None:
+            try:
+                component = getter()
+                if component is not None:
+                    return component
+            except Exception:
+                pass
+
+        component = getattr(template, "camera_component", None)
+        if component is not None:
+            return component
+
+    if hasattr(binding, "get_objects"):
+        try:
+            for obj in binding.get_objects():
+                getter = getattr(obj, "get_cine_camera_component", None)
+                if getter is None:
+                    continue
+                component = getter()
+                if component is not None:
+                    return component
+        except Exception:
+            pass
+
+    return None
+
+
+def apply_social_media_filmback(cine_component):
+    """Set Cine Camera filmback to the Social Media preset on a component."""
+    if cine_component is None or not APPLY_SOCIAL_MEDIA_FILMBACK:
+        return False
+
+    preset_setter = getattr(cine_component, "set_filmback_preset_by_name", None)
+    if preset_setter is not None:
+        try:
+            preset_setter(SOCIAL_MEDIA_FILMBACK_PRESET)
+            return True
+        except Exception:
+            pass
+
+    width, height = social_media_filmback_settings()
+    filmback = unreal.CameraFilmbackSettings(
+        sensor_width=width,
+        sensor_height=height,
+    )
+
+    for prop in ("filmback", "filmback_settings"):
+        try:
+            cine_component.set_editor_property(prop, filmback)
+            return True
+        except Exception:
+            continue
+
+    try:
+        current = cine_component.get_editor_property("filmback")
+        current.sensor_width = width
+        current.sensor_height = height
+        cine_component.set_editor_property("filmback", current)
+        return True
+    except Exception:
+        pass
+
+    return False
+
+
+def apply_social_media_filmback_to_binding(binding):
+    """Apply Social Media filmback to a spawnable/possessable camera binding."""
+    if binding is None or not APPLY_SOCIAL_MEDIA_FILMBACK:
+        return False
+
+    component = get_cine_camera_component_from_binding(binding)
+    return apply_social_media_filmback(component)
+
+
+def apply_social_media_filmback_to_sequence(sequence):
+    """Apply Social Media filmback to every CineCamera binding in a Level Sequence."""
+    if sequence is None or not APPLY_SOCIAL_MEDIA_FILMBACK:
+        return 0
+
+    count = 0
+    for getter in ("get_bindings", "get_spawnables"):
+        method = getattr(sequence, getter, None)
+        if method is None:
+            continue
+        try:
+            bindings = method()
+        except Exception:
+            continue
+        for binding in bindings or []:
+            if apply_social_media_filmback_to_binding(binding):
+                count += 1
+
+    return count
+
+
+def apply_social_media_filmback_to_project(project):
+    """
+    Update all main shot sequences under one production project.
+    Returns the number of sequences saved.
+    """
+    saved = 0
+    for shot in list_shot_folders(project):
+        seq_path = find_main_shot_sequence_path(project, shot)
+        if not seq_path:
+            continue
+        sequence = get_or_load_sequence(seq_path)
+        if sequence is None:
+            continue
+        if apply_social_media_filmback_to_sequence(sequence) > 0:
+            unreal.EditorAssetLibrary.save_asset(seq_path)
+            unreal.log(f"  ✓ Social Media filmback → {seq_path.rsplit('/', 1)[-1]}")
+            saved += 1
+    return saved
+
+
+def apply_social_media_filmback_to_all_projects():
+    """
+    Update all main shot sequences under every folder in /Game/Production/.
+    Returns the total number of sequences saved.
+    """
+    projects = list_project_folders()
+    if not projects:
+        unreal.log_warning(f"No production projects found under {PROJECT_ROOT}")
+        return 0
+
+    total = 0
+    unreal.log(f"Applying Social Media filmback across {len(projects)} project(s)...")
+    for project in projects:
+        saved = apply_social_media_filmback_to_project(project)
+        if saved:
+            unreal.log(f"  {project}: {saved} sequence(s) updated")
+        total += saved
+
+    unreal.log(f"Social Media filmback complete — {total} sequence(s) saved.")
+    return total
 
 
 # ─── DIALOGS ─────────────────────────────────────────────────────────────────
@@ -483,7 +773,231 @@ def create_level_sequence(package_path, asset_name, fps=SEQUENCE_FPS):
 
 def _set_section_range(section, start_frame, end_frame):
     """Set a Sequencer section's frame range (UE 5.4–5.7 tolerant)."""
-    return set_shot_section_range(section, start_frame, end_frame)
+    start = int(start_frame)
+    end = int(end_frame)
+
+    section_ext = getattr(unreal, "MovieSceneSectionExtensions", None)
+    if section_ext is not None and hasattr(section_ext, "set_range"):
+        try:
+            section_ext.set_range(section, start, end)
+            return True
+        except Exception:
+            pass
+
+    return set_shot_section_range(section, start, end)
+
+
+def _read_section_range(section):
+    """Read a section's display-frame range, preferring SequencerScripting extensions."""
+    section_ext = getattr(unreal, "MovieSceneSectionExtensions", None)
+    start = end = None
+
+    if section_ext is not None:
+        try:
+            if section_ext.has_start_frame(section):
+                start = section_ext.get_start_frame(section)
+            if section_ext.has_end_frame(section):
+                end = section_ext.get_end_frame(section)
+        except Exception:
+            pass
+
+    if start is None:
+        try:
+            start = _frame_number_value(section.get_start_frame())
+        except Exception:
+            start = None
+
+    if end is None:
+        try:
+            end = _frame_number_value(section.get_end_frame())
+        except Exception:
+            end = None
+
+    if start is None:
+        return None, None
+
+    return int(start), int(end) if end is not None else None
+
+
+def to_binding_proxy(sequence, binding):
+    """Normalize a binding to MovieSceneBindingProxy for UE 5.4–5.7 scripting."""
+    if binding is None:
+        return None
+
+    proxy_cls = getattr(unreal, "MovieSceneBindingProxy", None)
+    if proxy_cls is not None and isinstance(binding, proxy_cls):
+        return binding
+
+    binding_ext = getattr(unreal, "MovieSceneBindingExtensions", None)
+    guid = None
+
+    if binding_ext is not None and hasattr(binding_ext, "get_id"):
+        try:
+            guid = binding_ext.get_id(binding)
+        except Exception:
+            guid = None
+
+    if guid is None and hasattr(binding, "get_id"):
+        try:
+            guid = binding.get_id()
+        except Exception:
+            guid = None
+
+    if guid is None and hasattr(binding, "binding_id"):
+        try:
+            guid = binding.binding_id
+        except Exception:
+            guid = None
+
+    if guid is not None and proxy_cls is not None and sequence is not None:
+        for ctor in (
+            lambda: proxy_cls(binding_id=guid, sequence=sequence),
+            lambda: proxy_cls(guid, sequence),
+        ):
+            try:
+                return ctor()
+            except Exception:
+                continue
+
+    return binding
+
+
+def get_sequence_bindings(sequence):
+    """Return all bindings on a sequence using SequencerScripting extensions when available."""
+    if sequence is None:
+        return []
+
+    seq_ext = getattr(unreal, "MovieSceneSequenceExtensions", None)
+    if seq_ext is not None and hasattr(seq_ext, "get_bindings"):
+        try:
+            bindings = seq_ext.get_bindings(sequence)
+            if bindings:
+                return list(bindings)
+        except Exception:
+            pass
+
+    for getter in ("get_bindings", "get_spawnables"):
+        method = getattr(sequence, getter, None)
+        if method is None:
+            continue
+        try:
+            bindings = method()
+            if bindings:
+                return list(bindings)
+        except Exception:
+            continue
+
+    return []
+
+
+def resolve_binding_by_name(sequence, binding_name, fallback=None):
+    """Find a binding proxy by Sequencer display/object name."""
+    if not binding_name:
+        return to_binding_proxy(sequence, fallback)
+
+    binding_ext = getattr(unreal, "MovieSceneBindingExtensions", None)
+
+    for binding in get_sequence_bindings(sequence):
+        proxy = to_binding_proxy(sequence, binding)
+        names = []
+
+        if binding_ext is not None:
+            for getter_name in ("get_name", "get_display_name"):
+                getter = getattr(binding_ext, getter_name, None)
+                if getter is None:
+                    continue
+                try:
+                    value = getter(proxy)
+                    if value is not None:
+                        names.append(str(value))
+                except Exception:
+                    continue
+
+        for getter_name in ("get_name", "get_display_name"):
+            getter = getattr(proxy, getter_name, None)
+            if getter is None:
+                continue
+            try:
+                value = getter()
+                if value is not None:
+                    names.append(str(value))
+            except Exception:
+                continue
+
+        if binding_name in names:
+            return proxy
+
+    return to_binding_proxy(sequence, fallback)
+
+
+def get_child_bindings(binding, sequence=None):
+    """Return child possessable bindings (e.g. CineCameraComponent under the camera actor)."""
+    if binding is None:
+        return []
+
+    binding = to_binding_proxy(sequence, binding)
+    ext = getattr(unreal, "MovieSceneBindingExtensions", None)
+    if ext is not None and hasattr(ext, "get_child_possessables"):
+        try:
+            return [to_binding_proxy(sequence, child) for child in ext.get_child_possessables(binding)]
+        except Exception:
+            pass
+
+    if hasattr(binding, "get_child_possessables"):
+        try:
+            return [to_binding_proxy(sequence, child) for child in binding.get_child_possessables()]
+        except Exception:
+            pass
+
+    return []
+
+
+def collect_binding_tree(root_binding, sequence=None):
+    """Root binding plus all nested child bindings."""
+    collected = []
+    seen = set()
+    binding_ext = getattr(unreal, "MovieSceneBindingExtensions", None)
+
+    def identity(binding):
+        if binding_ext is not None and hasattr(binding_ext, "get_id"):
+            try:
+                value = binding_ext.get_id(binding)
+                if value is not None:
+                    return value
+            except Exception:
+                pass
+        return id(binding)
+
+    def walk(binding):
+        if binding is None:
+            return
+        proxy = to_binding_proxy(sequence, binding)
+        key = identity(proxy)
+        if key in seen:
+            return
+        seen.add(key)
+        collected.append(proxy)
+        for child in get_child_bindings(proxy, sequence):
+            walk(child)
+
+    walk(root_binding)
+    return collected
+
+
+def add_spawnable_binding(sequence, actor):
+    """Add a spawnable binding, preferring LevelSequenceEditorSubsystem on UE 5.7."""
+    binding = None
+    ls_editor = unreal.get_editor_subsystem(unreal.LevelSequenceEditorSubsystem)
+    if ls_editor is not None and hasattr(ls_editor, "add_spawnable_from_instance"):
+        try:
+            binding = ls_editor.add_spawnable_from_instance(sequence, actor)
+        except Exception:
+            binding = None
+
+    if binding is None and hasattr(sequence, "add_spawnable_from_instance"):
+        binding = sequence.add_spawnable_from_instance(actor)
+
+    return to_binding_proxy(sequence, binding)
 
 
 def _assign_skeletal_animation(section, anim):
@@ -505,33 +1019,189 @@ def _assign_geometry_cache(section, cache):
         pass
 
 
-def offset_binding_section_ranges(binding, offset_frames):
-    """Shift every section on a spawnable binding forward by offset_frames."""
+def _get_track_sections(track):
+    """Return sections on a Sequencer track (UE 5.4–5.7 tolerant)."""
+    if track is None:
+        return []
+
+    track_ext = getattr(unreal, "MovieSceneTrackExtensions", None)
+    if track_ext is not None and hasattr(track_ext, "get_sections"):
+        try:
+            sections = track_ext.get_sections(track)
+            if sections:
+                return list(sections)
+        except Exception:
+            pass
+
+    if hasattr(track, "get_sections"):
+        try:
+            sections = track.get_sections()
+            if sections:
+                return list(sections)
+        except Exception:
+            pass
+
+    return []
+
+
+def snap_binding_sections_to_range(binding, start_frame, end_frame):
+    """Force every section on a binding to the given timeline range."""
+    start = int(start_frame)
+    end = int(end_frame)
+    if binding is None or end <= start:
+        return 0
+
+    snapped = 0
+    for track in get_binding_tracks(binding):
+        for section in _get_track_sections(track):
+            if _set_section_range(section, start, end):
+                snapped += 1
+                continue
+            try:
+                section.set_start_frame_bounded(start)
+                section.set_end_frame_bounded(end)
+                snapped += 1
+            except Exception:
+                continue
+    return snapped
+
+
+def offset_binding_section_ranges(binding, offset_frames, sequence=None, include_children=True):
+    """
+    Shift every section on a binding forward — equivalent to dragging Shot##_cam
+    one frame in the Sequencer outliner.
+    """
     offset = int(offset_frames)
     if offset <= 0 or binding is None:
-        return
+        return 0
 
-    tracks = []
+    binding = to_binding_proxy(sequence, binding)
+    bindings = collect_binding_tree(binding, sequence) if include_children else [binding]
+    shifted = 0
+
+    for item in bindings:
+        for track in get_binding_tracks(item, sequence):
+            for section in _get_track_sections(track):
+                start, end = _read_section_range(section)
+                if start is None:
+                    continue
+                if end is None:
+                    end = start
+                if _set_section_range(section, start + offset, end + offset):
+                    shifted += 1
+
+    return shifted
+
+
+def get_binding_tracks(binding, sequence=None):
+    """Return all tracks on a sequencer binding (UE 5.4–5.7 tolerant)."""
+    if binding is None:
+        return []
+
+    binding = to_binding_proxy(sequence, binding)
+    ext = getattr(unreal, "MovieSceneBindingExtensions", None)
+    if ext is not None and hasattr(ext, "get_tracks"):
+        try:
+            tracks = ext.get_tracks(binding)
+            if tracks:
+                return list(tracks)
+        except Exception:
+            pass
+
     if hasattr(binding, "get_tracks"):
         try:
             tracks = binding.get_tracks()
+            if tracks:
+                return list(tracks)
+        except Exception:
+            pass
+
+    return []
+
+
+def _binding_id_for_camera_cut(sequence, binding):
+    """Resolve a MovieSceneObjectBindingID for a camera cut section."""
+    binding_id = unreal.MovieSceneObjectBindingID()
+    try:
+        return sequence.get_binding_id(binding)
+    except Exception:
+        pass
+    try:
+        return sequence.make_binding_id(binding, unreal.MovieSceneObjectBindingSpace.LOCAL)
+    except Exception:
+        pass
+    try:
+        ext = getattr(unreal, "MovieSceneBindingExtensions", None)
+        if ext is not None and hasattr(ext, "get_id"):
+            guid = ext.get_id(binding)
+            binding_id.set_editor_property("guid", guid)
+    except Exception:
+        pass
+    return binding_id
+
+
+def apply_camera_cut_range(cut_section, sequence, binding, cam_start, playback_end):
+    """Set camera cut section range and re-bind after FBX import."""
+    if cut_section is None:
+        return False
+
+    ok = _set_section_range(cut_section, cam_start, playback_end)
+    try:
+        cut_section.set_camera_binding_id(_binding_id_for_camera_cut(sequence, binding))
+    except Exception:
+        pass
+    return ok
+
+
+def fix_sequence_camera_cut_tracks(sequence, binding, cam_start, playback_end):
+    """
+    Re-apply camera cut timing on the sequence master tracks.
+    FBX import can reset sections back to frame 0.
+    """
+    fixed = 0
+    track_ext = getattr(unreal, "MovieSceneTrackExtensions", None)
+    seq_ext = getattr(unreal, "MovieSceneSequenceExtensions", None)
+
+    tracks = []
+    if seq_ext is not None and hasattr(seq_ext, "find_tracks_by_type"):
+        try:
+            tracks = seq_ext.find_tracks_by_type(sequence, unreal.MovieSceneCameraCutTrack)
+        except Exception:
+            tracks = []
+
+    if not tracks and hasattr(sequence, "find_tracks_by_type"):
+        try:
+            tracks = sequence.find_tracks_by_type(unreal.MovieSceneCameraCutTrack)
+        except Exception:
+            tracks = []
+
+    if not tracks and hasattr(sequence, "get_tracks"):
+        try:
+            tracks = [
+                t for t in sequence.get_tracks()
+                if t and "CameraCut" in type(t).__name__
+            ]
         except Exception:
             tracks = []
 
     for track in tracks or []:
         sections = []
-        if hasattr(track, "get_sections"):
+        if track_ext is not None and hasattr(track_ext, "get_sections"):
+            try:
+                sections = track_ext.get_sections(track)
+            except Exception:
+                sections = []
+        if not sections and hasattr(track, "get_sections"):
             try:
                 sections = track.get_sections()
             except Exception:
                 sections = []
+
         for section in sections or []:
-            try:
-                start = _frame_number_value(section.get_start_frame())
-                end = _frame_number_value(section.get_end_frame())
-                _set_section_range(section, start + offset, end + offset)
-            except Exception:
-                continue
+            if apply_camera_cut_range(section, sequence, binding, cam_start, playback_end):
+                fixed += 1
+
+    return fixed
 
 
 def set_sequence_playback_range(sequence, total_frames):
@@ -647,7 +1317,8 @@ def add_geocache_track(sequence, cache_package):
 def add_camera(sequence, camera_fbx_path, camera_name, content_frames=0, total_frames=0,
                has_anim_or_cache=False):
     """
-    Spawn a CineCamera, add a Camera Cut track from frame 0, import camera FBX.
+    Spawn a CineCamera, import camera FBX, add Camera Cut from frame 0.
+    When the shot has anims/caches, drag the camera binding to frame 1 (anim preroll on 0).
     Returns (ok, message).
     """
     actor_subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
@@ -661,24 +1332,17 @@ def add_camera(sequence, camera_fbx_path, camera_name, content_frames=0, total_f
     focus_settings = cine_component.get_editor_property("focus_settings")
     focus_settings.focus_method = unreal.CameraFocusMethod.DISABLE
     cine_component.set_editor_property("focus_settings", focus_settings)
+    apply_social_media_filmback(cine_component)
+    set_actor_label(temp_camera, camera_name)
 
-    binding = sequence.add_spawnable_from_instance(temp_camera)
+    binding = add_spawnable_binding(sequence, temp_camera)
+    apply_social_media_filmback_to_binding(binding)
     actor_subsystem.destroy_actor(temp_camera)
-    binding.set_display_name(camera_name)
+    apply_camera_binding_names(binding, camera_name)
 
-    cam_start = camera_start_frame(has_anim_or_cache, content_frames)
+    cut_start = camera_cut_start_frame()
+    camera_start = camera_transform_start_frame(has_anim_or_cache, content_frames)
     playback_end = total_frames if total_frames > 0 else max(content_frames, 1)
-
-    cut_track = sequence.add_track(unreal.MovieSceneCameraCutTrack)
-    cut_section = cut_track.add_section()
-    _set_section_range(cut_section, cam_start, playback_end)
-
-    binding_id = unreal.MovieSceneObjectBindingID()
-    try:
-        binding_id = sequence.get_binding_id(binding)
-    except Exception:
-        binding_id = sequence.make_binding_id(binding, unreal.MovieSceneObjectBindingSpace.LOCAL)
-    cut_section.set_camera_binding_id(binding_id)
 
     settings = unreal.MovieSceneUserImportFBXSettings()
     settings.set_editor_property("match_by_name_only", False)
@@ -687,10 +1351,11 @@ def add_camera(sequence, camera_fbx_path, camera_name, content_frames=0, total_f
     settings.set_editor_property("force_front_x_axis", False)
 
     world = unreal.UnrealEditorSubsystem().get_editor_world()
+    import_bindings = [to_binding_proxy(sequence, binding)]
 
     try:
         ok = unreal.SequencerTools.import_level_sequence_fbx(
-            world, sequence, [binding], settings, camera_fbx_path
+            world, sequence, import_bindings, settings, camera_fbx_path
         )
     except Exception as exc:
         return False, f"camera FBX import failed: {exc}"
@@ -698,9 +1363,42 @@ def add_camera(sequence, camera_fbx_path, camera_name, content_frames=0, total_f
     if not ok:
         return False, "camera FBX import returned False"
 
+    binding = resolve_binding_by_name(sequence, camera_name, binding)
+    apply_social_media_filmback_to_binding(binding)
+    apply_camera_binding_names(binding, camera_name)
+
+    sections_shifted = 0
+    if camera_start > 0:
+        sections_shifted = offset_binding_section_ranges(
+            binding, camera_start, sequence=sequence, include_children=True
+        )
+
+    cut_track = sequence.add_track(unreal.MovieSceneCameraCutTrack)
+    cut_section = cut_track.add_section()
+    apply_camera_cut_range(cut_section, sequence, binding, cut_start, playback_end)
+    fix_sequence_camera_cut_tracks(sequence, binding, cut_start, playback_end)
+
+    if camera_start > 0 and sections_shifted == 0:
+        unreal.log_warning(
+            f"    ! camera '{camera_name}' — could not shift root binding to frame {camera_start}; "
+            "check Sequencer manually"
+        )
+
+    filmback_note = ""
+    if APPLY_SOCIAL_MEDIA_FILMBACK:
+        filmback_note = f", filmback Social Media ({SOCIAL_MEDIA_SENSOR_WIDTH_MM}×{SOCIAL_MEDIA_SENSOR_HEIGHT_MM}mm)"
+
+    timing_note = f"cut {cut_start}–{playback_end}"
+    if camera_start > 0:
+        timing_note += f", camera binding dragged to frame {camera_start}"
+    else:
+        timing_note += ", camera from frame 0"
+    if sections_shifted:
+        timing_note += f" ({sections_shifted} section(s) shifted)"
+
     return True, (
         f"camera '{camera_name}' imported from {os.path.basename(camera_fbx_path)} "
-        f"(frames 0–{playback_end})"
+        f"({timing_note}{filmback_note})"
     )
 
 
@@ -1282,7 +1980,7 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
         # Existing sequence: skip by default, delete first when overwriting
         if unreal.EditorAssetLibrary.does_asset_exist(seq_path):
             if not overwrite:
-                unreal.log(f"    → SKIPPED — {seq_name} already exists")
+                unreal.log(f"    → SKIPPED — {seq_name} already exists (enable Overwrite to rebuild)")
                 counts["skipped"] += 1
                 continue
             if dry_run:
@@ -1314,8 +2012,11 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
             for c in caches:
                 unreal.log(f"    [DRY RUN]   + geo cache     : {c.rsplit('/', 1)[-1]} (preroll + full)")
             if camera_fbx:
+                est_content = estimate_shot_duration_frames(project, shot, fps) if (anims or caches) else 0
+                camera_start = camera_transform_start_frame(bool(anims or caches), est_content)
                 unreal.log(
-                    f"    [DRY RUN]   + camera        : {camera_name_for(camera_fbx)} (starts frame 0)"
+                    f"    [DRY RUN]   + camera        : {camera_name_for(camera_fbx, shot=shot)} "
+                    f"(cut 0–end, camera binding from frame {camera_start})"
                 )
             else:
                 unreal.log(f"    [DRY RUN]   ! no camera FBX — sequence without Camera Cut track")
@@ -1365,7 +2066,7 @@ def run(project_name="", camera_folder="", shot_filter="", dry_run=False, fps=SE
                 ok, msg = add_camera(
                     sequence,
                     fbx_path,
-                    camera_name_for(camera_fbx),
+                    camera_name_for(camera_fbx, shot=shot),
                     content_frames=content_frames,
                     total_frames=total_frames,
                     has_anim_or_cache=has_anim_or_cache,

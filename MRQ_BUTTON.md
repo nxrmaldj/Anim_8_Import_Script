@@ -1,48 +1,120 @@
-# Fix — Add Shots to Render Queue (MRQ button)
+# MRQ — Add Shots to Movie Render Queue (widget setup)
 
-Use this if the **Add Shots to Render Queue** button does nothing, opens a project picker instead of using the combo, or MRQ stays empty.
+Step-by-step to add a **dedicated project dropdown + Refresh + Create MRQ** button to your Editor Utility Widget.
 
----
-
-## Before you click the button
-
-1. **Movie Render Queue** plugin enabled → restart editor
-2. **Open your render level** in the editor (MRQ needs a map — jobs won't appear without one)
-3. **Select a project** in the widget **Project** dropdown (`SequenceProjectCombo`)
-4. Python console once per session (if Anim8 nodes missing): `import anim8_tools`
+The Python script (`script_3_render_queue.py`) is already written — you only need widget controls and graph wiring.
 
 ---
 
-## Fix the widget graph (UE 5.5)
+## What the button does
 
-Open **`EUW_Anim8Pipeline5_5`** → **Graph** tab.
+1. Reads the **MRQ Project** dropdown you select
+2. Finds every **main** shot Level Sequence under `/Game/Production/{Project}/Shot##/`
+3. **Skips** `*_Lighting` and `{Project}_Master`
+4. **Clears** Movie Render Queue
+5. **Adds one MRQ job per shot** (uses the level you have open as the render map)
+6. Opens the MRQ window
 
-### Delete broken MRQ wiring
+---
 
-Remove any MRQ button nodes that:
-- Call `script_3_render_queue.run()` with **no** `{project}` pin
-- Use `interactive=True` (causes popup picker instead of combo)
-- Wire `{project}` to the **Organize** text box (always empty)
+## Prerequisites
 
-### Wire Option A — Anim8 Blueprint node (recommended)
+| Plugin | Required |
+|---|---|
+| Python Editor Script Plugin | Yes |
+| Anim8 Pipeline | Yes |
+| **Movie Render Queue** | Yes |
+| Editor Scripting Utilities | Yes (List Assets for dropdown) |
 
-1. **RenderQueueButton** → **On Clicked**
-2. Add node: **`Add Project Shots To Render Queue`** (category **Anim8 Pipeline**)
-3. Connect:
-   - **Exec:** On Clicked → node input
-   - **Project Name:** `SequenceProjectCombo` → **Get Selected Option**
+Restart the editor after enabling plugins.
 
-If Get Selected Option is empty at runtime:
+**Before clicking the button:** open the **level you render from** in the viewport. MRQ needs a map.
+
+---
+
+## Step 1 — Designer layout
+
+Add **Section 3** below Build Sequences:
+
+```
+── 3 · Movie Render Queue ─────────────────
+Project  [ CoffeeMonster_Fight ▼ ]  [ Refresh ]
+[        Create MRQ Jobs        ]
+```
+
+---
+
+## Step 2 — Widget variables (Designer → Is Variable)
+
+| Widget | Variable name | Notes |
+|---|---|---|
+| Combo Box (String) | `RenderQueueProjectCombo` | MRQ project picker |
+| Button | `RefreshRenderQueueButton` | label: **Refresh** |
+| Button | `CreateMrqButton` | label: **Create MRQ Jobs** (or "Add Shots to Render Queue") |
+
+---
+
+## Step 3 — Fill the MRQ dropdown (copy Build Sequences pattern)
+
+This is the same recipe as `RefreshProjectCombo` in [WIDGET_GUIDE.md](WIDGET_GUIDE.md) Step 5, but for **`RenderQueueProjectCombo`**.
+
+### Create custom event
+
+1. Graph tab → right-click → **Add Event → Custom Event**
+2. Rename to **`RefreshRenderQueueProjectCombo`**
+
+### Inside the custom event (same as Section 2 Refresh)
+
+| Step | Node | Settings |
+|---|---|---|
+| 1 | **Clear Options** on `RenderQueueProjectCombo` | |
+| 2 | **List Assets** | Path `/Game/Production/`, Recursive OFF, **Include Folder ON** |
+| 3 | **For Each Loop** | Array ← List Assets Return Value |
+| 4 | **Replace** | Remove `/Game/Production/` prefix from folder path |
+| 5 | **Add Option** on `RenderQueueProjectCombo` | Item ← Replace result |
+| 6 | **Set Selected Index** `0` | After For Each **Completed** |
+
+### Hook triggers
+
+| When | Wire |
+|---|---|
+| **Event Construct** | → `RefreshRenderQueueProjectCombo` |
+| **RefreshRenderQueueButton → On Clicked** | → `RefreshRenderQueueProjectCombo` |
+
+**Tip:** On Event Construct you can chain **both** refreshes:
+
+```
+Event Construct → RefreshProjectCombo → RefreshRenderQueueProjectCombo
+```
+
+---
+
+## Step 4 — Wire Create MRQ Jobs button
+
+### Option A — Anim8 Blueprint node (recommended)
+
+1. Graph → search **`Add Project Shots To Render Queue`** (category **Anim8 Pipeline**)
+2. If missing: restart editor after plugin install, or Python console: `import anim8_tools`
+
+```
+On Clicked (CreateMrqButton)
+    → Add Project Shots To Render Queue
+        Project Name ← RenderQueueProjectCombo → Get Selected Option
+```
+
+If **Get Selected Option** is empty at runtime:
 
 | Pin | Wire from |
 |---|---|
-| Project Name | `SequenceProjectCombo` → **Get Selected Index** → **Get Option String At Index** |
+| Project Name | `RenderQueueProjectCombo` → **Get Selected Index** → **Get Option String At Index** |
 
-### Wire Option B — Execute Python Command
+### Option B — Execute Python Command
 
-On Clicked → **Execute Python Command** ← **Format Text** → To String
+```
+On Clicked (CreateMrqButton) → Execute Python Command
+```
 
-**Format field (paste entire line):**
+**Format Text** (paste entire line):
 
 ```
 import pipeline_common, script_3_render_queue, importlib; importlib.reload(pipeline_common); importlib.reload(script_3_render_queue); script_3_render_queue.run(project_name="{project}", interactive=False)
@@ -50,46 +122,56 @@ import pipeline_common, script_3_render_queue, importlib; importlib.reload(pipel
 
 | Pin | Wire from |
 |---|---|
-| `{project}` | `SequenceProjectCombo` → Get Selected Option (or Get Option String At Index) |
+| `{project}` | `RenderQueueProjectCombo` → **Get Selected Option** |
 
-**Compile → Save** the widget.
+**Do NOT** wire `{project}` to Organize text box or `SequenceProjectCombo` unless you want them linked — use **`RenderQueueProjectCombo`**.
+
+**Do NOT** use `interactive=True` — that opens a popup picker instead of using your dropdown.
+
+**Compile → Save**
 
 ---
 
-## Verify in Output Log
+## Step 5 — Test
 
-After clicking the button you should see:
+1. Open your render level
+2. Select a project in **Render Queue → Project** dropdown
+3. Click **Create MRQ Jobs**
+4. Check **Output Log**:
 
 ```
-Script 3 — starting (project_name='YourProject')
-Map     : /Game/Maps/YourMap.YourMap
+Script 3 — Add Shots to Movie Render Queue
+Project : YourProject
+  Shot01 → Shot01_YourProject
   + MRQ job 'Shot01_YourProject'  map=...  seq=...
 Done — Cleared queue, added N job(s)
-MRQ queue reports N job(s)
 ```
 
-Then open **Window → Cinematics → Movie Render Queue**.
+5. **Window → Cinematics → Movie Render Queue** — all main shots listed
 
----
-
-## Common errors
-
-| Log message | Fix |
-|---|---|
-| `project_name=''` | Wire combo to Project Name / `{project}` |
-| `No editor level is open` | Open your render map first |
-| `No main shot sequences found` | Build sequences first, or check legacy `Shot##` names exist |
-| `Movie Render Queue subsystem not found` | Enable MRQ plugin, restart |
-| Popup picker instead of combo | Remove `interactive=True`; wire `{project}` from combo |
-
----
-
-## Console test (bypass widget)
+### Console test (bypass widget)
 
 ```python
 import importlib, script_3_render_queue
 importlib.reload(script_3_render_queue)
-script_3_render_queue.run(project_name="CoffeeMonster_Fight", interactive=False)
+script_3_render_queue.run(project_name="YourProject", dry_run=True)
+script_3_render_queue.run(project_name="YourProject")
 ```
 
-See also: [WIDGET_GUIDE.md](WIDGET_GUIDE.md) Button 4, [PLUGIN_INSTALL.md](PLUGIN_INSTALL.md)
+---
+
+## Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| Button does nothing | White exec wire: On Clicked → node / Execute Python |
+| `project_name=''` | Wire **RenderQueueProjectCombo**, not Organize text box |
+| Popup picker appears | Remove `interactive=True` from Python command |
+| `No editor level is open` | Open your render map first |
+| `No main shot sequences found` | Run **Build Sequences** first |
+| `Movie Render Queue subsystem not found` | Enable MRQ plugin, restart |
+| Node not in graph search | Restart editor; `import anim8_tools` in Python console |
+
+---
+
+See also: [WIDGET_GUIDE.md](WIDGET_GUIDE.md), [PLUGIN_INSTALL.md](PLUGIN_INSTALL.md)

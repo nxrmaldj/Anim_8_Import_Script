@@ -1,12 +1,6 @@
-DefaultEngine.ini in this folder is copied with the plugin on install.
-
-It adds a Cine Camera filmback preset:
-  Name   : Social Media
-  Width  : 13.365 mm
-  Height : 23.76 mm
-
-After install: enable Anim8 Pipeline → restart the editor.
-Then: select a Cine Camera → Filmback → Social Media.
-
-This does NOT change your default filmback for new cameras unless you add
-DefaultFilmbackPreset="Social Media" to the project's own DefaultEngine.ini.
+DefaultEngine.ini — Cine Camera Social Media filmback preset.
+
+DefaultEditorPerProjectUserSettings.ini — EUB_ToolBar + EUB_ToolBar_Button startup.
+
+After install: enable Anim8 Pipeline → restart the editor.
+Both toolbar assets run on startup; Tools → Anim8 Pipeline opens the main widget.

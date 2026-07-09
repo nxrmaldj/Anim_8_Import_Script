@@ -12,7 +12,7 @@ Complete reference for building and wiring the pipeline widget in Unreal Engine.
 | **Build Sequences** | `script_2_sequence.py` | Builds shot sequences (preroll + lighting subsequence) and master |
 | **Add to Render Queue** | `script_3_render_queue.py` | Clears MRQ and adds all main shot sequences |
 
-**MRQ button not working?** → [MRQ_BUTTON.md](MRQ_BUTTON.md) (fix wiring in `EUW_Anim8Pipeline5_5`)
+**MRQ button not working?** → [MRQ_BUTTON.md](MRQ_BUTTON.md) (fix wiring in `EUW_Anim8Pipeline`)
 
 **Typical workflow:**
 1. TA imports FBX/ABC into `/Game/Staging` using Unreal's normal import window
@@ -74,9 +74,9 @@ Build this layout in the **Designer** tab. Use Text blocks for section headers i
 │  [ ] Overwrite Existing                       │
 │  [       Build Sequences        ]             │
 │                                               │
-│  ── 3 · Render Queue ──────────────────────   │
-│  Project  [ TestRun ▼ ]                       │
-│  [     Add Shots to Render Queue    ]         │
+│  ── 3 · Movie Render Queue ─────────────────   │
+│  Project  [ TestRun ▼ ]  [ Refresh ]          │
+│  [        Create MRQ Jobs         ]           │
 │                                               │
 └───────────────────────────────────────────────┘
 ```
@@ -108,12 +108,15 @@ For **every** control below: select it in Designer → Details panel → tick **
 | Check Box | `OverwriteCheckbox` | **unchecked** |
 | Button | `SequenceRunButton` | label: "Build Sequences" |
 
-### Section 3 — Render Queue
+### Section 3 — Movie Render Queue
 
 | Widget | Variable name | Default |
 |---|---|---|
-| Combo Box (String) | `RenderQueueProjectCombo` | same project list as Section 2 (or reuse `SequenceProjectCombo`) |
-| Button | `RenderQueueButton` | label: "Add Shots to Render Queue" |
+| Combo Box (String) | `RenderQueueProjectCombo` | filled on widget open + **Refresh** (see [MRQ_BUTTON.md](MRQ_BUTTON.md)) |
+| Button | `RefreshRenderQueueButton` | label: "Refresh" |
+| Button | `CreateMrqButton` | label: "Create MRQ Jobs" |
+
+Full MRQ dropdown + button wiring: **[MRQ_BUTTON.md](MRQ_BUTTON.md)** (step-by-step, same pattern as Build Sequences).
 
 **Removed from Section 2:** Project Name text box and Camera Folder text box — project is a **dropdown in the widget**, camera path is set by **Find Camera Folder** (stored in memory, no popup on Run).
 
@@ -625,37 +628,25 @@ import pipeline_common, script_2_sequence, importlib; importlib.reload(pipeline_
 
 ---
 
-### Button 4 — RenderQueueButton (recommended: Anim8 Blueprint node)
+### Button 4 — CreateMrqButton
 
-**Easiest wiring — no Format Text:**
+See **[MRQ_BUTTON.md](MRQ_BUTTON.md)** for the full step-by-step (dropdown, Refresh, button wiring).
 
-1. Graph → search **`Add Project Shots To Render Queue`** (category **Anim8 Pipeline**)
-2. If missing: Python console once → `import anim8_tools` → restart editor
-3. Wire:
+**Quick wiring:**
 
 ```
-On Clicked (RenderQueueButton) ──exec──► Add Project Shots To Render Queue
+On Clicked (CreateMrqButton) ──exec──► Add Project Shots To Render Queue
                                               ▲
-SequenceProjectCombo → Get Selected Option ───┘  (Project Name pin)
+RenderQueueProjectCombo → Get Selected Option ┘  (Project Name pin)
 ```
 
-If **Get Selected Option** is empty, use **Get Option String At Index** with **Get Selected Index** instead.
-
----
-
-**Alternate — Execute Python Command**
-
-Format Text:
+**Execute Python alternate** — use `{project}` from **`RenderQueueProjectCombo`** (not SequenceProjectCombo):
 
 ```
 import pipeline_common, script_3_render_queue, importlib; importlib.reload(pipeline_common); importlib.reload(script_3_render_queue); script_3_render_queue.run(project_name="{project}", interactive=False)
 ```
 
-| `{project}` | `SequenceProjectCombo` → **Get Selected Option** |
-
-**Before clicking:** open the **level you render from** in the editor. MRQ needs a map — jobs will not appear if no level is open.
-
-**What it does:** Clears MRQ, adds every main shot LS for the selected project (legacy `Shot##` names included). Opens the MRQ window when done. Check **Output Log** for `MRQ queue reports N job(s)`.
+**Before clicking:** open your **render level**. MRQ needs a map.
 
 ---
 
@@ -694,7 +685,9 @@ Each main shot sequence is built with:
 | Track | Frames |
 |---|---|
 | Skeletal anims / Alembic | Frame **0** = 1-frame hold (first pose); frame **1+** = full clip |
-| Camera | Starts frame **0** (full shot length) |
+| Camera Cut | Frame **0** → end (MRQ render starts at 0) |
+| Camera spawn / sections (actor + component) | Frame **0** → end |
+| Camera transform & component keys | First keys at frame **1** when shot has anims/caches |
 | Lighting subsequence (`MovieSceneSubTrack`) | **0 → total** (matches full shot length, e.g. 121) |
 | Lighting LS asset playback | Same **0 → total** as the parent shot |
 

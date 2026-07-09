@@ -6,8 +6,12 @@
 # From the Unreal Python console (plugin enabled):
 #   import script_3_render_queue
 #   script_3_render_queue.run(project_name="MyProject")
+#   script_3_render_queue.run(project_name="CoffeeMonster_Fight", output_root="D:/Renders/CoffeeMonster_Fight")
+
+MRQ_SCRIPT_BUILD_ID = "path-only-v2"
 
 import importlib
+import os
 import unreal
 
 import pipeline_common
@@ -34,6 +38,67 @@ def list_main_shot_sequence_paths(project):
         if seq_path:
             entries.append((shot, seq_path))
     return entries
+
+
+def project_name_from_production_path(production_path):
+    """
+    '/Game/Production/CoffeeMonster_Fight' → 'CoffeeMonster_Fight'
+    Also accepts the project folder name alone.
+    """
+    path = str(production_path or "").strip().replace("\\", "/").rstrip("/")
+    prefix = f"{s2.PROJECT_ROOT}/"
+    if path.startswith(prefix):
+        remainder = path[len(prefix):]
+        return remainder.split("/")[0] if remainder else ""
+    if path.startswith("/Game/"):
+        return path.rsplit("/", 1)[-1]
+    return path
+
+
+def _configure_job_output(job, output_dir):
+    """Set MRQ output directory on a job and create the folder on disk."""
+    output_dir = str(output_dir or "").strip().replace("\\", "/").rstrip("/")
+    if not output_dir or job is None:
+        return False
+
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+    except OSError as exc:
+        unreal.log_warning(f"  ! Could not create output folder {output_dir}: {exc}")
+
+    output_setting = None
+    try:
+        config = job.get_configuration()
+        if config is None:
+            return False
+
+        find_method = getattr(config, "find_or_add_setting_by_class", None)
+        if find_method is not None:
+            output_setting = find_method(unreal.MoviePipelineOutputSetting)
+        else:
+            output_setting = config.find_setting_by_class(unreal.MoviePipelineOutputSetting)
+    except Exception as exc:
+        unreal.log_warning(f"  ! MRQ output setting failed for {output_dir}: {exc}")
+        return False
+
+    if output_setting is None:
+        return False
+
+    for prop, value in (
+        ("output_directory", unreal.DirectoryPath(path=output_dir)),
+        ("file_name_format", "{sequence_name}.{frame_number}"),
+        ("override_existing_output", True),
+    ):
+        try:
+            output_setting.set_editor_property(prop, value)
+        except Exception:
+            try:
+                setattr(output_setting, prop, value)
+            except Exception:
+                pass
+
+    unreal.log(f"    output → {output_dir}")
+    return True
 
 
 def package_path_to_soft_path(package_path):
@@ -150,6 +215,18 @@ def _soft_path_for_current_map():
     return None
 
 
+def _resolve_map_soft_path(map_override=""):
+    """Resolve MRQ map path — override, or current editor level."""
+    override = str(map_override or "").strip()
+    if override:
+        override = override.split(".")[0]
+        name = override.rsplit("/", 1)[-1]
+        if name and not override.endswith(f".{name}"):
+            return unreal.SoftObjectPath(f"{override}.{name}")
+        return unreal.SoftObjectPath(override)
+    return _soft_path_for_current_map()
+
+
 def _initialize_job_configuration(job):
     try:
         config = job.get_configuration()
@@ -181,15 +258,20 @@ def _apply_job_fields(job, label, map_soft_path, sequence_soft_path):
             pass
 
 
-def add_sequence_job(queue, sequence_path, job_label="", map_soft_path=None):
+def add_sequence_job(queue, sequence_path, job_label="", map_soft_path=None,
+                     output_root="", shot=""):
     """
     Allocate one MRQ job for a Level Sequence. Uses the current editor map.
+    When output_root is set, writes to output_root/Shot##/ on disk.
     Returns the job on success, or None.
     """
-    sequence = s2.get_or_load_sequence(sequence_path)
-    if sequence is None:
-        unreal.log_warning(f"  ! Could not load sequence asset: {sequence_path}")
+    if not unreal.EditorAssetLibrary.does_asset_exist(sequence_path):
+        unreal.log_warning(f"  ! Sequence asset not found: {sequence_path}")
         return None
+
+    # Do not load the Level Sequence here — loading spawnables can trigger
+    # "Building skeletal mesh..." compiles for every shot. MRQ only needs paths.
+    sequence_soft_path = package_path_to_soft_path(sequence_path)
 
     map_soft_path = map_soft_path or _soft_path_for_current_map()
     if map_soft_path is None or not str(map_soft_path):
@@ -198,22 +280,7 @@ def add_sequence_job(queue, sequence_path, job_label="", map_soft_path=None):
         )
         return None
 
-    sequence_soft_path = soft_path_from_sequence(sequence, sequence_path)
     label = job_label or sequence_path.rsplit("/", 1)[-1]
-
-    editor_lib = getattr(unreal, "MoviePipelineEditorLibrary", None)
-    if editor_lib is not None and hasattr(editor_lib, "create_job_from_sequence"):
-        try:
-            job = editor_lib.create_job_from_sequence(queue, sequence)
-            if job is not None:
-                _initialize_job_configuration(job)
-                _apply_job_fields(job, label, map_soft_path, sequence_soft_path)
-                unreal.log(
-                    f"  + MRQ job '{label}'  map={map_soft_path}  seq={sequence_soft_path}"
-                )
-                return job
-        except Exception as exc:
-            unreal.log_warning(f"  create_job_from_sequence failed for {label}: {exc}")
 
     try:
         job = queue.allocate_new_job(unreal.MoviePipelineExecutorJob)
@@ -223,7 +290,14 @@ def add_sequence_job(queue, sequence_path, job_label="", map_soft_path=None):
 
     _initialize_job_configuration(job)
     _apply_job_fields(job, label, map_soft_path, sequence_soft_path)
-    unreal.log(f"  + MRQ job '{label}'  map={map_soft_path}  seq={sequence_soft_path}")
+
+    if output_root and shot:
+        _configure_job_output(job, f"{output_root.rstrip('/')}/{shot}")
+
+    unreal.log(
+        f"  + MRQ job '{label}'  map={map_soft_path}  seq={sequence_soft_path} "
+        f"(path-only, no sequence load)"
+    )
     return job
 
 
@@ -249,17 +323,24 @@ def open_movie_render_queue_ui():
             continue
 
 
-def run(project_name="", dry_run=False, interactive=False):
+def run(project_name="", production_path="", output_root="", map_path="",
+        dry_run=False, interactive=False, open_queue_ui=False):
     """
     Clear Movie Render Queue and add all main shot sequences for the project.
 
-      project_name  production folder under /Game/Production/
-                    from widget: pass SequenceProjectCombo selection
-      dry_run       log the plan without touching MRQ
-      interactive   open project picker when project_name is blank (console)
+      project_name     folder name, e.g. CoffeeMonster_Fight
+      production_path  optional full path, e.g. /Game/Production/CoffeeMonster_Fight
+      output_root      optional disk path — creates output_root/Shot##/ per job
+      map_path         optional /Game/Maps/YourLevel override (else uses open level)
+      dry_run          log only
+      interactive      project picker when project_name blank
     """
     sep = "=" * 60
-    unreal.log(f"Script 3 — starting (project_name={project_name!r})")
+
+    if production_path and not project_name:
+        project_name = project_name_from_production_path(production_path)
+
+    unreal.log(f"Script 3 — starting (build={MRQ_SCRIPT_BUILD_ID}, project_name={project_name!r})")
 
     projects = list_production_projects()
     if not projects:
@@ -304,17 +385,21 @@ def run(project_name="", dry_run=False, interactive=False):
         )
         return 0
 
-    map_soft_path = _soft_path_for_current_map()
+    map_soft_path = _resolve_map_soft_path(map_path)
     if map_soft_path is None and not dry_run:
         unreal.log_error(
-            "No editor level is open. Open the level you render from, then click the button again."
+            "No editor level is open. Open your render map first, or pass map_path="
+            "'/Game/Maps/YourLevel.YourLevel'"
         )
         return -1
 
     unreal.log(f"\n{sep}")
     unreal.log("Script 3 — Add Shots to Movie Render Queue")
     unreal.log(f"Project : {project}")
+    unreal.log(f"Root    : {s2.PROJECT_ROOT}/{project}/")
     unreal.log(f"Map     : {map_soft_path}")
+    if output_root:
+        unreal.log(f"Output  : {output_root}/Shot##/")
     unreal.log(f"Shots   : {len(shot_entries)}")
     unreal.log(f"Mode    : {'DRY RUN' if dry_run else 'CLEAR queue + ADD jobs'}")
     unreal.log(sep)
@@ -348,6 +433,8 @@ def run(project_name="", dry_run=False, interactive=False):
             seq_path,
             job_label=s2.sequence_name_for(shot, project),
             map_soft_path=map_soft_path,
+            output_root=output_root,
+            shot=shot,
         )
         if job is None:
             errors += 1
@@ -369,7 +456,13 @@ def run(project_name="", dry_run=False, interactive=False):
     unreal.log("Window → Cinematics → Movie Render Queue")
     unreal.log(f"{sep}\n")
 
-    open_movie_render_queue_ui()
+    if open_queue_ui:
+        open_movie_render_queue_ui()
+    else:
+        unreal.log(
+            "MRQ window not auto-opened (avoids loading every sequence / building skeletal meshes). "
+            "Open it manually when ready."
+        )
     return added if errors == 0 else -1
 
 
